@@ -2,13 +2,15 @@ package com.github.akreit
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.github.akreit.model.{ClientRequest, ContextSource}
-import com.github.plokhotnyuk.jsoniter_scala.core.readFromString
+import com.github.akreit.model.ClientRequest
+import com.github.akreit.model.ContextSource
 import com.github.akreit.server.Endpoints
+import com.github.plokhotnyuk.jsoniter_scala.core.readFromString
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import sttp.client4.{UriContext, basicRequest}
+import sttp.client4.UriContext
+import sttp.client4.basicRequest
 import sttp.client4.testing.BackendStub
 import sttp.tapir.integ.cats.effect.CatsMonadError
 import sttp.tapir.server.stub4.TapirStubInterpreter
