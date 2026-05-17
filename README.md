@@ -1,10 +1,44 @@
 ## Overview
 
-This project contains an API server that clients can use to get rich responses
-from LLMs to their prompts. The server gets context to the users' prompts from various sources,
-e.g. GitHub, Jira & Confluence.
+A gateway server that allows clients to interact with LLMs, include additional context, track token usage etc.
+
+```
+                                 ┌────────────┐
+                                 │    Jira    │
+                                 └─────┬──────┘
+                                       │
+                                 ┌─────┴──────┐
+                                 │ Confluence │
+                                 └─────┬──────┘
+                                       │
+                                 ┌─────┴──────┐
+                                 │   GitHub   │
+                                 └─────┬──────┘
+                                       │
+                                       │ fetch context
+                                       │
+┌────────┐   POST /v1/context   ┌──────┴──────────┐   user msg + context   ┌─────────────┐
+│        │   /completions       │                 │                        │             │
+│ Client ├─────────────────────►│  AI Context     ├───────────────────────►│  Claude LLM │
+│        │◄─────────────────────┤  Server         │◄───────────────────────┤             │
+│        │   CompletionResponse │                 │   LLM completion       │             │
+└────────┘                      └─────────────────┘                        └─────────────┘
+```
 
 See details in the `docs/` folder.
+
+## Motivation
+
+Integrating LLMs into applications can be complex for multiple reasons:
+
+* **additional context**: when working in a business context, it often makes sense to enrich prompts with additional context e.g. from tools like Jira, Confluence or GitHub.
+    Seting up these integrations should not be done by every client application and developer.
+* **efficient usage**: LLMs can be expensive to use, and it is important to optimize the usage by caching results, batching requests and reusing context when possible.
+* **standardized interface**: providing a standardized interface for clients to interact with LLMs, e.g. to deal with corporate proxies and other policies
+* **LLM agnostic**: the server should be able to work with different LLM providers, and switch between them without affecting the clients.
+* **cost transparency**: the server can provide insights into the costs of using LLMs, e.g. by tracking usage and providing cost estimates.
+
+These points can be addressed by providing a dedicated API server that handles the interactions with LLMs and the integration with other tools, and provides a standardized interface for clients to use.
 
 ## Building and running the project
 
