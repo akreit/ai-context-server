@@ -11,19 +11,28 @@ See details in the `docs/` folder.
 This project uses sbt to build and compile the code, run tests and execute the application.
 You can use the sbt shell or run the commands directly in your terminal.
 
-### Docker Compose
-
-```shell
-docker-compose up --build
-```
-
-### From Source
-
 ```shell
 sbt compile # build the project
 sbt test # run the tests
 sbt run # run the application (Main)
 ```
+
+### Docker Compose
+
+You can also build an assembly and run the application using Docker Compose.
+This will create a Docker image for the application and start a container.
+
+First, build the assembly using sbt:
+```shell
+sbt assembly
+```
+
+Then, you can build the Docker image and run the container using Docker Compose:
+```shell
+docker-compose up --build
+```
+
+You can now test the API server e.g. by opening the Swagger docs at `http://localhost:8080/docs/`.
 
 ## Links:
 
