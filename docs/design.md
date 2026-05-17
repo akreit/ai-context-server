@@ -10,7 +10,7 @@ A middleware server that decouples LLM consumers (chatbot UIs, CLI tools, other 
 - No RAG, no vector store, no embedding models
 - Tool calling only — LLM decides reactively what to fetch via MCP tools
 - `context_sets` reframed as "activate these MCP tool servers for this request" (enum: `jira`, `github`, `repo-docs`, `support-tickets`)
-- Per-session tool result cache in Redis (avoids redundant MCP round-trips within a session)
+- Per-session tool result cache in-memory (avoids redundant MCP round-trips within a session; in-memory is sufficient — cache is ephemeral by nature and staleness on restart is acceptable)
 - Stateful sessions — server holds conversation history in PostgreSQL (JSONB)
 - API-key authentication only (single-tenant); straightforward path to multi-tenant later
 - MCP client only (stdio transport; does not expose itself as MCP server)
@@ -48,7 +48,7 @@ A middleware server that decouples LLM consumers (chatbot UIs, CLI tools, other 
                               │                   (stdio clients)  │
                               │                        │           │
                               │                        ▼           │
-                              │                   Redis Tool Cache │
+                              │                   In-Memory Cache  │
                               │                   (check before    │
                               │                    calling MCP)    │
                               │                        │           │
@@ -79,8 +79,8 @@ POST /v1/context/completions
   ├─ 6. LLM call (sttp-ai)
   │     ├─ finish_reason = stop → done
   │     └─ finish_reason = tool_calls →
-  │           ├─ check Redis cache for (session_id, tool, args)
-  │           ├─ on miss: call MCP server, store result in Redis
+  │           ├─ check in-memory cache for (session_id, tool, args)
+  │           ├─ on miss: call MCP server, store result in cache
   │           └─ append tool result messages → loop to step 6
   ├─ 7. Session save: append exchange to PostgreSQL
   ├─ 8. Usage accounting: record token usage
@@ -188,17 +188,16 @@ All HTTP communication with LLM providers. fs2 streaming adapter pipes directly 
 
 Messages stored as OpenAI-format `[{role, content}]` array (tool call and tool result messages included). Token-window trim applied before appending if history approaches model limit.
 
-### Tool result cache: Redis
+### Tool result cache: In-memory
 
 Per-session cache to avoid redundant MCP calls within a conversation.
 
-- **Key:** `tool_cache:{session_id}:{tool_name}:{sha256(canonicalArgs)}`
+- **Key:** `(session_id, tool_name, sha256(canonicalArgs))`
 - **Value:** tool result string (raw MCP response content)
-- **TTL:** matches session TTL (default 24h)
-- **Client:** `redis4cats` — cats-effect native, `Resource[IO, RedisCommands[IO, String, String]]`
+- **Implementation:** `IORef[Map[CacheKey, String]]` per session, held in the session's fiber scope
+- **Lifetime:** process lifetime — cache is intentionally ephemeral; a restart serving fresh MCP data is preferable to serving stale cached results
 
-**Trade-off vs PostgreSQL for cache:**
-Using PostgreSQL for this is possible (`tool_cache` table) but Redis is better here — O(1) key lookup, automatic TTL eviction, no table scan. The cache is ephemeral by nature; losing it on Redis restart is acceptable (MCP re-call is the fallback). If adding Redis as infra is undesirable for a first version, start with a `Map[String, String]` in-memory cache scoped to the session fiber — zero infra but no cross-request sharing.
+**Why not PostgreSQL or Redis:** The cache's purpose is intra-session deduplication within a single conversation. Tool results (Jira issues, GitHub PRs) change over time, so persisting them across restarts risks serving stale data to the LLM. In-memory naturally expires with the process, which aligns with "data was fresh when this conversation was active." The `ToolResultCache` trait keeps the door open to swap implementations if cross-process sharing is ever needed.
 
 ### Token counting: JTokkit (standalone)
 
@@ -254,7 +253,7 @@ def buildMcpRegistry(config: CaasConfig): Resource[IO, McpRegistry] =
 
 `McpRegistry` exposes:
 - `toolSpecs(contextSets): List[ToolSpec]` — all tool specs from the requested servers, converted to sttp-ai format
-- `execute(sessionId, toolName, args): IO[String]` — checks Redis cache first, calls MCP on miss, stores result
+- `execute(sessionId, toolName, args): IO[String]` — checks in-memory cache first, calls MCP on miss, stores result
 
 ### Tool calling loop
 
@@ -365,11 +364,6 @@ caas {
     pool-size = 10
   }
 
-  redis {
-    uri      = ${REDIS_URI}   # e.g. redis://localhost:6379
-    ttl-hours = 24
-  }
-
   llm-providers {
     openai    { api-key = ${OPENAI_API_KEY} }
     anthropic { api-key = ${ANTHROPIC_API_KEY} }
@@ -459,8 +453,7 @@ com.github.akreit
 │
 ├── cache/
 │   ├── ToolResultCache.scala         — trait: get / put
-│   ├── RedisToolResultCache.scala    — redis4cats implementation
-│   └── InMemoryToolResultCache.scala — fallback for local dev (no Redis)
+│   └── InMemoryToolResultCache.scala — IORef[Map[CacheKey, String]] per session
 │
 ├── llm/
 │   ├── LLMGateway.scala             — trait: complete / stream
@@ -498,10 +491,6 @@ com.github.akreit
 "org.postgresql"  % "postgresql"                   % "42.7.4",
 "com.zaxxer"      % "HikariCP"                     % "5.1.0",
 
-// Redis (cats-effect native)
-"dev.profunktor" %% "redis4cats-effects"            % "1.7.0",
-"dev.profunktor" %% "redis4cats-log4cats"           % "1.7.0",
-
 // Token counting
 "com.knuddels"   % "jtokkit"                        % "1.1.0",
 
@@ -519,7 +508,7 @@ Removed vs previous: `langchain4j`, `langchain4j-pgvector`, `langchain4j-cohere`
 
 2. **sttp-ai tool spec format.** Confirm the exact type sttp-ai uses for tool definitions when calling Anthropic vs OpenAI — the provider wire formats differ (Anthropic uses `input_schema`, OpenAI uses `parameters`). sttp-ai should abstract this, but verify. The `McpToolAdapter` needs to know what type to produce.
 
-3. **Redis as hard dependency.** For local dev and simple deployments, Redis is extra friction. The `ToolResultCache` trait with an `InMemoryToolResultCache` fallback (Map inside an `IORef`) covers this. Make Redis optional via config: if `redis.uri` is absent, use in-memory cache.
+3. **Tool result cache is in-memory only.** Cache is lost on restart; MCP re-call is the fallback. This is intentional — tool results (Jira, GitHub) change over time and serving stale cached data post-restart is worse than a fresh MCP call. If horizontal scaling or cross-process cache sharing is ever needed, the `ToolResultCache` trait allows swapping in a Redis implementation without touching call sites.
 
 4. **MCP tool result size.** Some MCP tools (e.g. `get_issue` with full description, `read_file` for large files) can return large payloads. These count against the context window. Add a `max-tool-result-chars` config option that truncates oversized results with a `[truncated]` suffix before appending to messages.
 
