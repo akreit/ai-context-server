@@ -18,7 +18,7 @@ inThisBuild(
 
 val tapirVersion = "1.13.19"
 val otelVersion  = "1.62.0"
-val sttpVersion  = "4.0.10"
+val sttpVersion  = "4.0.23"
 
 lazy val rootProject = (project in file(".")).settings(
   Seq(
@@ -39,6 +39,7 @@ lazy val rootProject = (project in file(".")).settings(
       "com.softwaremill.sttp.ai"              %% "claude"                                     % "0.4.11",
       "com.softwaremill.sttp.ai"              %% "fs2"                                        % "0.4.11",
       "com.softwaremill.sttp.client4"         %% "cats"                                       % sttpVersion,
+      "io.modelcontextprotocol.sdk"            % "mcp"                                        % "1.1.2",
       "com.softwaremill.sttp.tapir"           %% "tapir-sttp-stub4-server"                    % tapirVersion % Test,
       "org.scalatest"                         %% "scalatest"                                  % "3.2.20" % Test
     )
