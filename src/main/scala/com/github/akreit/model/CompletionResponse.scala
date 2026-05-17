@@ -1,11 +1,12 @@
 package com.github.akreit.model
 
 import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
+import com.github.plokhotnyuk.jsoniter_scala.macros.ConfiguredJsonValueCodec
 import com.github.plokhotnyuk.jsoniter_scala.macros.JsonCodecMaker
 
 case class AssistantMessage(
-  role: String,
-  content: String
+    role: String,
+    content: String
 )
 
 object AssistantMessage {
@@ -13,9 +14,9 @@ object AssistantMessage {
 }
 
 case class ToolCallMade(
-  tool: String,
-  source: String,
-  cacheHit: Boolean
+    tool: String,
+    source: String,
+    cacheHit: Boolean
 )
 
 object ToolCallMade {
@@ -23,10 +24,10 @@ object ToolCallMade {
 }
 
 case class Usage(
-  promptTokens: Int,
-  completionTokens: Int,
-  totalTokens: Int,
-  toolRounds: Int
+    promptTokens: Int,
+    completionTokens: Int,
+    totalTokens: Int,
+    toolRounds: Int
 )
 
 object Usage {
@@ -34,17 +35,12 @@ object Usage {
 }
 
 case class CompletionResponse(
-  id: String,
-  sessionId: String,
-  model: String,
-  provider: String,
-  message: AssistantMessage,
-  toolCallsMade: List[ToolCallMade],
-  usage: Usage,
-  finishReason: String
-)
-
-object CompletionResponse {
-  given JsonValueCodec[CompletionResponse] = JsonCodecMaker.make
-}
-
+    id: String,
+    sessionId: String,
+    model: String,
+    provider: String,
+    message: AssistantMessage,
+    toolCallsMade: List[ToolCallMade],
+    usage: Usage,
+    finishReason: String
+) derives ConfiguredJsonValueCodec

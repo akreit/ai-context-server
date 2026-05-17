@@ -1,22 +1,33 @@
-package com.github.akreit
+package com.github.akreit.server
 
-import sttp.tapir.*
 import cats.effect.IO
-import com.github.akreit.model.{AssistantMessage, ClientRequest, CompletionResponse, ToolCallMade, Usage}
+import com.github.akreit.model.AssistantMessage
+import com.github.akreit.model.ClientRequest
+import com.github.akreit.model.CompletionResponse
+import com.github.akreit.model.ToolCallMade
+import com.github.akreit.model.Usage
 import io.opentelemetry.api.OpenTelemetry
+import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.jsoniter.*
-import sttp.tapir.server.metrics.opentelemetry.OpenTelemetryMetrics
 import sttp.tapir.server.ServerEndpoint
-import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.server.interceptor.metrics.MetricsRequestInterceptor
+import sttp.tapir.server.metrics.opentelemetry.OpenTelemetryMetrics
+import sttp.tapir.swagger.bundle.SwaggerInterpreter
 
 object Endpoints {
 
-  val contextEndpoint: PublicEndpoint[ClientRequest, Unit, CompletionResponse, Any] = endpoint.post
-    .in("v1" / "context" / "completions")
-    .in(jsonBody[ClientRequest])
-    .out(jsonBody[CompletionResponse])
+  private val contextEndpoint
+      : PublicEndpoint[ClientRequest, Unit, CompletionResponse, Any] =
+    endpoint.post
+      .in("v1" / "context" / "completions")
+      .in(jsonBody[ClientRequest])
+      .out(jsonBody[CompletionResponse])
+      // TODO: add more specific error responses with proper status codes and error models
+      .errorOut(
+        statusCode(sttp.model.StatusCode.InternalServerError)
+          .description("Internal Server Error")
+      )
 
   private[akreit] val contextServerEndpoint: ServerEndpoint[Any, IO] =
     contextEndpoint.serverLogicSuccess { request =>
@@ -32,9 +43,12 @@ object Endpoints {
         "1.0"
       )
 
-  val all: List[ServerEndpoint[Any, IO]] = contextServerEndpoint :: swaggerEndpoints
+  val all: List[ServerEndpoint[Any, IO]] =
+    contextServerEndpoint :: swaggerEndpoints
 
-  private def buildCompletionResponse(request: ClientRequest): CompletionResponse = {
+  private def buildCompletionResponse(
+      request: ClientRequest
+  ): CompletionResponse = {
     val normalizedMessage = request.message.trim
     val sourceLabels = request.additionalSources.map(_.toString)
     val sourceSummary =
@@ -42,7 +56,7 @@ object Endpoints {
       else sourceLabels.mkString(", ")
 
     val content =
-      s"Received '${normalizedMessage}' for user ${request.userId}. Enabled context sources: ${sourceSummary}."
+      s"Received '$normalizedMessage' for user ${request.userId}. Enabled context sources: $sourceSummary."
 
     CompletionResponse(
       id = s"cmpl-${request.timestamp}",
@@ -71,6 +85,7 @@ object Endpoints {
   }
 
   def metricsInterceptor(otel: OpenTelemetry): MetricsRequestInterceptor[IO] =
-    OpenTelemetryMetrics.default[IO](otel.getMeter("ai-context-server")).metricsInterceptor()
+    OpenTelemetryMetrics
+      .default[IO](otel.getMeter("ai-context-server"))
+      .metricsInterceptor()
 }
-
