@@ -11,6 +11,14 @@ See details in the `docs/` folder.
 This project uses sbt to build and compile the code, run tests and execute the application.
 You can use the sbt shell or run the commands directly in your terminal.
 
+### Docker Compose
+
+```shell
+docker-compose up --build
+```
+
+### From Source
+
 ```shell
 sbt compile # build the project
 sbt test # run the tests
