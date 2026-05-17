@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: sbtscala/scala-sbt:eclipse-temurin-25.0.1_8_1.12.11_3.8.3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache sbt
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/coursier
+          key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt', 'project/plugins.sbt', 'project/build.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-sbt-
+
+      - name: Check formatting
+        run: sbt scalafmtCheckAll
+
+      - name: Check scalafix
+        run: sbt "scalafixAll --check"
+
+      - name: Run tests
+        run: sbt test
+
