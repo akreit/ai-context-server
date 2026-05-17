@@ -4,9 +4,14 @@ import cats.effect.IO
 import com.github.akreit.model.AssistantMessage
 import com.github.akreit.model.ClientRequest
 import com.github.akreit.model.CompletionResponse
-import com.github.akreit.model.ToolCallMade
+import com.github.akreit.model.ErrorResponse
+import com.github.akreit.model.LlmError
 import com.github.akreit.model.Usage
+import com.github.akreit.service.LlmGateway
 import io.opentelemetry.api.OpenTelemetry
+import sttp.ai.claude.models.ContentBlock
+import sttp.ai.claude.responses.MessageResponse
+import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.jsoniter.*
@@ -15,26 +20,74 @@ import sttp.tapir.server.interceptor.metrics.MetricsRequestInterceptor
 import sttp.tapir.server.metrics.opentelemetry.OpenTelemetryMetrics
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 
-object Endpoints {
+class Endpoints(llmGateway: LlmGateway) {
 
-  private val contextEndpoint
-      : PublicEndpoint[ClientRequest, Unit, CompletionResponse, Any] =
+  private val contextEndpoint: PublicEndpoint[
+    ClientRequest,
+    (StatusCode, ErrorResponse),
+    CompletionResponse,
+    Any
+  ] =
     endpoint.post
       .in("v1" / "context" / "completions")
       .in(jsonBody[ClientRequest])
       .out(jsonBody[CompletionResponse])
-      // TODO: add more specific error responses with proper status codes and error models
-      .errorOut(
-        statusCode(sttp.model.StatusCode.InternalServerError)
-          .description("Internal Server Error")
-      )
+      .errorOut(statusCode.and(jsonBody[ErrorResponse]))
 
   private[akreit] val contextServerEndpoint: ServerEndpoint[Any, IO] =
-    contextEndpoint.serverLogicSuccess { request =>
-      IO.pure(buildCompletionResponse(request))
+    contextEndpoint.serverLogic { request =>
+      llmGateway
+        .complete(request.message)
+        .map(
+          _.left.map(mapError).map(constructResponse(request, _))
+        )
     }
 
-  // additional routes for swagger docs
+  /** propagate llm errors to appropriate HTTP status codes and error messages
+    * for the client
+    *
+    * @param error
+    *   [[LlmError]] returned from the LLM gateway
+    * @return
+    *   a tuple of (HTTP status code, error response body) to return to the
+    *   client
+    */
+  private def mapError(error: LlmError): (StatusCode, ErrorResponse) =
+    error match
+      case LlmError.Timeout(msg)        => ErrorResponse.timeout(msg)
+      case LlmError.ApiError(code, msg) =>
+        ErrorResponse.badGateway(s"LLM returned $code: $msg")
+      case LlmError.ConnectionFailed(cause) =>
+        ErrorResponse.serviceUnavailable(cause.getMessage)
+      case LlmError.Unexpected(cause) =>
+        ErrorResponse.internalError(cause.getMessage)
+
+  private def constructResponse(
+      request: ClientRequest,
+      llmResponse: MessageResponse
+  ): CompletionResponse =
+    CompletionResponse(
+      id = s"cmpl-${request.timestamp}",
+      sessionId = request.userId,
+      model = llmResponse.model,
+      provider = "anthropic",
+      message = AssistantMessage(
+        role = "assistant",
+        content = llmResponse.content.collect {
+          case ContentBlock.TextContent(text, _) => text
+        }.mkString
+      ),
+      toolCallsMade = Nil,
+      usage = Usage(
+        inputTokens = llmResponse.usage.inputTokens,
+        outputTokens = llmResponse.usage.outputTokens,
+        totalTokens =
+          llmResponse.usage.inputTokens + llmResponse.usage.outputTokens,
+        toolRounds = 0
+      ),
+      finishReason = llmResponse.stopReason.getOrElse("end_turn")
+    )
+
   private val swaggerEndpoints: List[ServerEndpoint[Any, IO]] =
     SwaggerInterpreter()
       .fromServerEndpoints[IO](
@@ -45,45 +98,9 @@ object Endpoints {
 
   val all: List[ServerEndpoint[Any, IO]] =
     contextServerEndpoint :: swaggerEndpoints
+}
 
-  private def buildCompletionResponse(
-      request: ClientRequest
-  ): CompletionResponse = {
-    val normalizedMessage = request.message.trim
-    val sourceLabels = request.additionalSources.map(_.toString)
-    val sourceSummary =
-      if sourceLabels.isEmpty then "no additional sources"
-      else sourceLabels.mkString(", ")
-
-    val content =
-      s"Received '$normalizedMessage' for user ${request.userId}. Enabled context sources: $sourceSummary."
-
-    CompletionResponse(
-      id = s"cmpl-${request.timestamp}",
-      sessionId = request.userId,
-      model = "stub-context-model",
-      provider = "local",
-      message = AssistantMessage(
-        role = "assistant",
-        content = content
-      ),
-      toolCallsMade = sourceLabels.map(source =>
-        ToolCallMade(
-          tool = "context_lookup",
-          source = source,
-          cacheHit = false
-        )
-      ),
-      usage = Usage(
-        promptTokens = normalizedMessage.length,
-        completionTokens = content.length,
-        totalTokens = normalizedMessage.length + content.length,
-        toolRounds = sourceLabels.size
-      ),
-      finishReason = "stop"
-    )
-  }
-
+object Endpoints {
   def metricsInterceptor(otel: OpenTelemetry): MetricsRequestInterceptor[IO] =
     OpenTelemetryMetrics
       .default[IO](otel.getMeter("ai-context-server"))

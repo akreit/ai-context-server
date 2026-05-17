@@ -11,15 +11,18 @@ import sttp.tapir.Schema
   * to the user's query.
   */
 enum ContextSource:
-  case Jira, Confluence, Github, ProjectDocumentation
+  case Jira, Confluence, GitHub, ProjectDocumentation
 
 object ContextSource:
 
   // see: https://github.com/plokhotnyuk/jsoniter-scala/issues/1268
   // by default, jsoniter-scala encodes enums as objects with a "type" discriminator field, e.g. {"type": "Github"}
-  // we want to encode them as plain strings, e.g. "Github", so we need to configure the codec accordingly
+  // we want to encode them as plain strings, e.g. "GitHub", so we need to configure the codec accordingly
   given JsonValueCodec[ContextSource] = JsonCodecMaker.make(
-    CodecMakerConfig.withDiscriminatorFieldName(None)
+    CodecMakerConfig
+      .withDiscriminatorFieldName(None)
+      // TODO: this is not working yet, allow "jira" instead of "Jira", etc.
+      .withFieldNameMapper { case s => s.toLowerCase }
   )
 
   // tapir schemas and codecs for ContextSource, also configured to use plain strings instead of objects
