@@ -19,7 +19,7 @@ jobs:
       image: sbtscala/scala-sbt:eclipse-temurin-25.0.1_8_1.12.11_3.8.3
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache sbt
         uses: actions/cache@v4
