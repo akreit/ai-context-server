@@ -13,3 +13,6 @@ hs_err_pid*
 # Compiled Scala files
 target/
 **/target/
+
+# Secrets etc.
+.env

@@ -17,7 +17,8 @@ inThisBuild(
 )
 
 val tapirVersion = "1.13.19"
-val otelVersion = "1.62.0"
+val otelVersion  = "1.62.0"
+val sttpVersion  = "4.0.10"
 
 lazy val rootProject = (project in file(".")).settings(
   Seq(
@@ -33,6 +34,11 @@ lazy val rootProject = (project in file(".")).settings(
       "com.softwaremill.sttp.tapir"           %% "tapir-jsoniter-scala"                       % tapirVersion,
       "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros"                      % "2.38.12",
       "ch.qos.logback"                         % "logback-classic"                            % "1.5.32",
+      "com.github.pureconfig"                 %% "pureconfig-core"                            % "0.17.10",
+      "com.github.pureconfig"                 %% "pureconfig-cats-effect"                     % "0.17.10",
+      "com.softwaremill.sttp.ai"              %% "claude"                                     % "0.4.11",
+      "com.softwaremill.sttp.ai"              %% "fs2"                                        % "0.4.11",
+      "com.softwaremill.sttp.client4"         %% "cats"                                       % sttpVersion,
       "com.softwaremill.sttp.tapir"           %% "tapir-sttp-stub4-server"                    % tapirVersion % Test,
       "org.scalatest"                         %% "scalatest"                                  % "3.2.20" % Test
     )
