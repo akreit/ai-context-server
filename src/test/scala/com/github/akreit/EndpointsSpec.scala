@@ -20,7 +20,8 @@ import sttp.tapir.server.stub4.TapirStubInterpreter
 
 class EndpointsSpec extends AnyFlatSpec with Matchers with EitherValues:
 
-  private val stubGateway: LlmGateway = (_: String) =>
+  // LlmGateway is a SAM (Single Abstract Method) trait, so we can implement it with a lambda for testing;
+  private val stubGateway: LlmGateway = (_: ClientRequest) =>
     IO.pure(
       Right(
         MessageResponse(
@@ -65,9 +66,11 @@ class EndpointsSpec extends AnyFlatSpec with Matchers with EitherValues:
         |  "timestamp": 0
         |}""".stripMargin
     )
-    request.additionalSources shouldBe List(
-      ContextSource.GitHub,
-      ContextSource.Jira
+    request.additionalSources shouldBe Some(
+      List(
+        ContextSource.GitHub,
+        ContextSource.Jira
+      )
     )
   }
 

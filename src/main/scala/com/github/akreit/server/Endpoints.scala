@@ -34,13 +34,15 @@ class Endpoints(llmGateway: LlmGateway) {
       .out(jsonBody[CompletionResponse])
       .errorOut(statusCode.and(jsonBody[ErrorResponse]))
 
+  /** Server endpoint that handles incoming client requests, forwards them to
+    * the LLM. Add `additionalSources` from the request and pass on to server
+    * logic (which hands it down to LLM).
+    */
   private[akreit] val contextServerEndpoint: ServerEndpoint[Any, IO] =
     contextEndpoint.serverLogic { request =>
       llmGateway
-        .complete(request.message)
-        .map(
-          _.left.map(mapError).map(constructResponse(request, _))
-        )
+        .complete(request)
+        .map(_.left.map(mapError).map(constructResponse(request, _)))
     }
 
   /** propagate llm errors to appropriate HTTP status codes and error messages
@@ -77,13 +79,35 @@ class Endpoints(llmGateway: LlmGateway) {
           case ContentBlock.TextContent(text, _) => text
         }.mkString
       ),
+      // TODO: how can we get this information?
       toolCallsMade = Nil,
       usage = Usage(
         inputTokens = llmResponse.usage.inputTokens,
         outputTokens = llmResponse.usage.outputTokens,
         totalTokens =
           llmResponse.usage.inputTokens + llmResponse.usage.outputTokens,
-        toolRounds = 0
+        toolRounds = llmResponse.content.count {
+          case ContentBlock.ToolResultContent(_, _, _) =>
+            println(
+              "Found a tool result content block, counting towards tool rounds"
+            )
+            true
+          case ContentBlock.ToolUseContent(id, name, input) =>
+            println(
+              s"Found a tool use content block for tool '$name', counting towards tool rounds"
+            )
+            false
+          case ContentBlock.TextContent(text, _) =>
+            println(
+              s"Found a text content block with text: $text, not counting towards tool rounds"
+            )
+            false
+          case _ =>
+            println(
+              "Found a content block of an unrecognized type, not counting towards tool rounds"
+            )
+            false
+        }
       ),
       finishReason = llmResponse.stopReason.getOrElse("end_turn")
     )
