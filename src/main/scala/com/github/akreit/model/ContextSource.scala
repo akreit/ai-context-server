@@ -10,8 +10,11 @@ import sttp.tapir.Schema
   * by the server to fetch relevant information and include it in the response
   * to the user's query.
   */
-enum ContextSource:
-  case Jira, Confluence, GitHub, ProjectDocumentation
+enum ContextSource(val name: String):
+  case Jira extends ContextSource("jira")
+  case Confluence extends ContextSource("confluence")
+  case GitHub extends ContextSource("github")
+  case ProjectDocumentation extends ContextSource("projectdocumentation")
 
 object ContextSource:
 

@@ -19,6 +19,6 @@ import com.github.plokhotnyuk.jsoniter_scala.macros.ConfiguredJsonValueCodec
 case class ClientRequest(
     userId: String,
     message: String,
-    additionalSources: List[ContextSource],
+    additionalSources: Option[List[ContextSource]],
     timestamp: Long
 ) derives ConfiguredJsonValueCodec
