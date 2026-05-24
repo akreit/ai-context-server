@@ -5,6 +5,7 @@ import cats.effect.unsafe.implicits.global
 import com.github.akreit.model.*
 import com.github.akreit.server.Endpoints
 import com.github.akreit.service.LlmGateway
+import com.github.akreit.service.LlmResult
 import com.github.plokhotnyuk.jsoniter_scala.core.readFromString
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,17 +25,20 @@ class EndpointsSpec extends AnyFlatSpec with Matchers with EitherValues:
   private val stubGateway: LlmGateway = (_: ClientRequest) =>
     IO.pure(
       Right(
-        MessageResponse(
-          id = "msg-stub",
-          `type` = "message",
-          role = "assistant",
-          content = List(
-            ContentBlock.TextContent("This is some response from the llm")
+        LlmResult(
+          response = MessageResponse(
+            id = "msg-stub",
+            `type` = "message",
+            role = "assistant",
+            content = List(
+              ContentBlock.TextContent("This is some response from the llm")
+            ),
+            model = "claude-sonnet-4-20250514",
+            stopReason = Some("end_turn"),
+            stopSequence = None,
+            usage = ClaudeUsage(inputTokens = 10, outputTokens = 20)
           ),
-          model = "claude-sonnet-4-20250514",
-          stopReason = Some("end_turn"),
-          stopSequence = None,
-          usage = ClaudeUsage(inputTokens = 10, outputTokens = 20)
+          toolCallsMade = Nil
         )
       )
     )
