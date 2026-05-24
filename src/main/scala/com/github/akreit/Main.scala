@@ -18,15 +18,23 @@ import sttp.tapir.server.http4s.Http4sServerOptions
 
 object Main extends IOApp with CatsLogger:
 
-  /**
-   * Initializes and starts the HTTP server with the given configuration and MCP registry.
-   * Starts a [[LlmGateway]] and HTTP routes, and serves the API until the process is stopped.
-   * @param config application configuration loaded from file/env
-   * @param mcpRegistry registry of MCP servers and tools, used to construct the LLM gateway with access to tools
-   *                    
-   * @return an effect that runs the server and never completes until the process is stopped, yielding an exit code of success
-   */
-  private[akreit] def initContextServer(config: AppConfig, mcpRegistry: McpRegistry): IO[ExitCode] = {
+  /** Initializes and starts the HTTP server with the given configuration and
+    * MCP registry. Starts a [[LlmGateway]] and HTTP routes, and serves the API
+    * until the process is stopped.
+    * @param config
+    *   application configuration loaded from file/env
+    * @param mcpRegistry
+    *   registry of MCP servers and tools, used to construct the LLM gateway
+    *   with access to tools
+    *
+    * @return
+    *   an effect that runs the server and never completes until the process is
+    *   stopped, yielding an exit code of success
+    */
+  private[akreit] def initContextServer(
+      config: AppConfig,
+      mcpRegistry: McpRegistry
+  ): IO[ExitCode] = {
     for
       llmGateway = ClaudeLlmGateway.fromConfig(config.claude, mcpRegistry)
       endpoints = Endpoints(llmGateway)
@@ -59,9 +67,8 @@ object Main extends IOApp with CatsLogger:
     yield exitCode
   }
 
-  /**
-   * main entrypoint for this application
-   */
+  /** main entrypoint for this application
+    */
   override def run(args: List[String]): IO[ExitCode] =
     for
       config <- ConfigSource.default.loadF[IO, AppConfig]()

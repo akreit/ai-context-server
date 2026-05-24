@@ -42,7 +42,9 @@ class Endpoints(llmGateway: LlmGateway) {
     contextEndpoint.serverLogic { request =>
       llmGateway
         .complete(request)
-        .map(_.left.map(mapError).map(result => constructResponse(request, result)))
+        .map(
+          _.left.map(mapError).map(result => constructResponse(request, result))
+        )
     }
 
   /** propagate llm errors to appropriate HTTP status codes and error messages
