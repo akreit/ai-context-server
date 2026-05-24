@@ -2,12 +2,12 @@
 
 * ALWAYS use Metals MCP tool via curl (see below) to compile and run tests instead of relying on bash commands
 * If MCP tools are not available report that to the user
-* after adding a dependency to build.sbt, ALWAYS run the import-build tool
-* to look up a dependency or the latest version, use the find-dep tool
-* to look up the API of a class, use the inspect tool
+* after adding a dependency to build.sbt, ALWAYS run the `import-build tool
+* to look up a dependency or the latest version, use the `find-dep` tool
+* to look up the API of a class, use the `inspect` tool
 * use sbt --client instead of sbt to connect to a running sbt server for faster execution
 * to verify that the app starts use sbt run, WITHOUT --client, as it prevents interrupting the process
-* before committing, ALWAYS format all changed Scala files using ./bin/scalafmt
+* before committing, ALWAYS format all changed Scala files using `sbt scalafmtAll` & `sbt scalafmtTestAll`
 * NEVER use non-local returns
 
 # Compile & test Scala project with Metals MCP

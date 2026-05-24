@@ -20,16 +20,18 @@ import sttp.client4.testing.BackendStub
 import sttp.client4.testing.ResponseStub
 import sttp.tapir.integ.cats.effect.CatsMonadError
 
-/** Integration-style tests for [[ClaudeLlmGateway]] that exercise the full agent loop without
-  * hitting the network.
+/** Integration-style tests for [[ClaudeLlmGateway]] that exercise the full
+  * agent loop without hitting the network.
   *
-  * The sttp backend is replaced with a [[sttp.client4.testing.BackendStub]] that cycles through
-  * pre-baked [[MessageResponse]] values via `thenRespondCyclic`. `ResponseStub.exact` bypasses
-  * response deserialization and returns the typed value directly, so no JSON round-trip occurs.
+  * The sttp backend is replaced with a [[sttp.client4.testing.BackendStub]]
+  * that cycles through pre-baked [[MessageResponse]] values via
+  * `thenRespondCyclic`. `ResponseStub.exact` bypasses response deserialization
+  * and returns the typed value directly, so no JSON round-trip occurs.
   *
-  * A real [[McpSchema.Tool]] is constructed and returned from the stubbed [[McpRegistry]], so the
-  * full pipeline — `toolSpecs` → `ToolAdapter.fromJavaMcpTool` → agent loop → `execute` — is
-  * exercised end-to-end. The stub `McpRegistry` captures the server name, tool name, and
+  * A real [[McpSchema.Tool]] is constructed and returned from the stubbed
+  * [[McpRegistry]], so the full pipeline — `toolSpecs` →
+  * `ToolAdapter.fromJavaMcpTool` → agent loop → `execute` — is exercised
+  * end-to-end. The stub `McpRegistry` captures the server name, tool name, and
   * converted args, allowing assertions at every stage of the flow.
   */
 class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
@@ -37,11 +39,25 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
   // A real MCP tool definition with two input parameters
   private val searchTool: McpSchema.Tool =
     val properties: java.util.Map[String, Object] = Map(
-      "query" -> Map("type" -> "string", "description" -> "GitHub search query").asJava.asInstanceOf[Object],
-      "limit" -> Map("type" -> "number", "description" -> "Max results to return").asJava.asInstanceOf[Object]
+      "query" -> Map(
+        "type" -> "string",
+        "description" -> "GitHub search query"
+      ).asJava.asInstanceOf[Object],
+      "limit" -> Map(
+        "type" -> "number",
+        "description" -> "Max results to return"
+      ).asJava.asInstanceOf[Object]
     ).asJava
-    val inputSchema = McpSchema.JsonSchema("object", properties, List("query").asJava, null, null, null)
-    McpSchema.Tool.builder()
+    val inputSchema = McpSchema.JsonSchema(
+      "object",
+      properties,
+      List("query").asJava,
+      null,
+      null,
+      null
+    )
+    McpSchema.Tool
+      .builder()
       .name("search")
       .description("Search GitHub for PRs and issues")
       .inputSchema(inputSchema)
@@ -56,7 +72,8 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
       ContentBlock.ToolUseContent(
         id = "tool-1",
         name = "search",
-        input = Map("query" -> ujson.Str("user:akreit"), "limit" -> ujson.Num(5))
+        input =
+          Map("query" -> ujson.Str("user:akreit"), "limit" -> ujson.Num(5))
       )
     ),
     model = "claude-sonnet-4-20250514",
@@ -78,8 +95,7 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
   )
 
   private def makeGateway(stubRegistry: McpRegistry): ClaudeLlmGateway =
-    val stubBackend = BackendStub[IO](new CatsMonadError[IO]())
-      .whenAnyRequest
+    val stubBackend = BackendStub[IO](new CatsMonadError[IO]()).whenAnyRequest
       .thenRespondCyclic(
         ResponseStub.exact(Right(toolUseResponse)),
         ResponseStub.exact(Right(finalResponse))
@@ -102,36 +118,53 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
 
   "ClaudeLlmGateway agent loop" should "pass ujson args as correctly typed Java values to McpRegistry" in {
     var capturedServer = ""
-    var capturedTool   = ""
+    var capturedTool = ""
     var capturedArgs: Map[String, AnyRef] = Map.empty
 
     val stubRegistry = new McpRegistry(Map.empty):
-      override def toolSpecs(serverNames: Option[List[String]]): IO[Option[List[McpSchema.Tool]]] =
+      override def toolSpecs(
+          serverNames: Option[List[String]]
+      ): IO[Option[List[McpSchema.Tool]]] =
         IO.pure(Some(List(searchTool)))
-      override def execute(serverName: String, toolName: String, args: Map[String, AnyRef]): IO[String] =
+      override def execute(
+          serverName: String,
+          toolName: String,
+          args: Map[String, AnyRef]
+      ): IO[String] =
         capturedServer = serverName
-        capturedTool   = toolName
-        capturedArgs   = args
+        capturedTool = toolName
+        capturedArgs = args
         IO.pure("""[{"number":42,"title":"Fix login bug"}]""")
 
     makeGateway(stubRegistry).complete(githubRequest).unsafeRunSync()
 
     capturedServer shouldBe "github"
-    capturedTool   shouldBe "search"
-    capturedArgs.get("query") shouldBe Some("user:akreit")       // String, not "\"user:akreit\""
+    capturedTool shouldBe "search"
+    capturedArgs.get("query") shouldBe Some(
+      "user:akreit"
+    ) // String, not "\"user:akreit\""
     capturedArgs.get("limit") shouldBe Some(java.lang.Double.valueOf(5.0))
   }
 
   it should "return the final text response after tool calls complete" in {
     val stubRegistry = new McpRegistry(Map.empty):
-      override def toolSpecs(serverNames: Option[List[String]]): IO[Option[List[McpSchema.Tool]]] =
+      override def toolSpecs(
+          serverNames: Option[List[String]]
+      ): IO[Option[List[McpSchema.Tool]]] =
         IO.pure(Some(List(searchTool)))
-      override def execute(serverName: String, toolName: String, args: Map[String, AnyRef]): IO[String] =
+      override def execute(
+          serverName: String,
+          toolName: String,
+          args: Map[String, AnyRef]
+      ): IO[String] =
         IO.pure("""[{"number":42,"title":"Fix login bug"}]""")
 
-    val result = makeGateway(stubRegistry).complete(githubRequest).unsafeRunSync()
+    val result =
+      makeGateway(stubRegistry).complete(githubRequest).unsafeRunSync()
 
-    result.map(_.response.id)         shouldBe Right("msg-2")
+    result.map(_.response.id) shouldBe Right("msg-2")
     result.map(_.response.stopReason) shouldBe Right(Some("end_turn"))
-    result.map(_.response.content)    shouldBe Right(List(ContentBlock.TextContent("Search complete")))
+    result.map(_.response.content) shouldBe Right(
+      List(ContentBlock.TextContent("Search complete"))
+    )
   }

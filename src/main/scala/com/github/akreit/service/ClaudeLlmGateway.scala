@@ -21,18 +21,18 @@ import sttp.client4.Backend
 import sttp.client4.httpclient.cats.HttpClientCatsBackend
 
 /** LLM gateway backed by sttp-ai's Claude module.
- *
- *  Implements an agent loop that allows Claude to call tools via the MCP registry. Sequence is:
- *    * *
- *
- * */
+  *
+  * Implements an agent loop that allows Claude to call tools via the MCP
+  * registry. Sequence is: * *
+  */
 class ClaudeLlmGateway(
     client: ClaudeClient,
     model: String,
     maxTokens: Int,
     systemPrompt: Option[String],
     mcpRegistry: McpRegistry,
-    backendResource: Resource[IO, Backend[IO]] = HttpClientCatsBackend.resource[IO]()
+    backendResource: Resource[IO, Backend[IO]] =
+      HttpClientCatsBackend.resource[IO]()
 ) extends LlmGateway
     with CatsLogger:
 
@@ -47,7 +47,6 @@ class ClaudeLlmGateway(
       s"complete called: additionalSources=${clientRequest.additionalSources}, mcpServerNames=$mcpServerNames"
     ) >>
       mcpRegistry.toolSpecs(mcpServerNames).flatMap { mcpTools =>
-
         // map between MCP tool definitions of sttp-ai and mcp java sdk, see issue #3
         val claudeTools = mcpTools.map(_.map(ToolAdapter.fromJavaMcpTool))
 
@@ -111,17 +110,19 @@ class ClaudeLlmGateway(
       .flatMap {
         case Left(error) => IO.pure(Left(error))
         case Right(response) if response.stopReason.contains("tool_use") =>
-          executeToolCalls(response, serverNames).flatMap { (toolResultMsg, newToolCalls) =>
-            agentLoop(
-              messages = messages :+ Message
-                .assistant(response.content) :+ toolResultMsg,
-              tools = tools,
-              serverNames = serverNames,
-              backend = backend,
-              accToolCalls = accToolCalls ++ newToolCalls
-            )
+          executeToolCalls(response, serverNames).flatMap {
+            (toolResultMsg, newToolCalls) =>
+              agentLoop(
+                messages = messages :+ Message
+                  .assistant(response.content) :+ toolResultMsg,
+                tools = tools,
+                serverNames = serverNames,
+                backend = backend,
+                accToolCalls = accToolCalls ++ newToolCalls
+              )
           }
-        case Right(response) => IO.pure(Right(LlmResult(response, accToolCalls)))
+        case Right(response) =>
+          IO.pure(Right(LlmResult(response, accToolCalls)))
       }
 
   /** Collects all [[ContentBlock.ToolUseContent]] blocks from the response,
@@ -148,8 +149,13 @@ class ClaudeLlmGateway(
             .execute(serverName, toolUse.name, args)
             .map(result =>
               (
-                ContentBlock.ToolResultContent(toolUseId = toolUse.id, content = result),
-                ToolCallMade(tool = toolUse.name, source = serverName, cacheHit = false)
+                ContentBlock
+                  .ToolResultContent(toolUseId = toolUse.id, content = result),
+                ToolCallMade(
+                  tool = toolUse.name,
+                  source = serverName,
+                  cacheHit = false
+                )
               )
             )
             .handleError(e =>
@@ -159,7 +165,11 @@ class ClaudeLlmGateway(
                   content = e.getMessage,
                   isError = Some(true)
                 ),
-                ToolCallMade(tool = toolUse.name, source = serverName, cacheHit = false)
+                ToolCallMade(
+                  tool = toolUse.name,
+                  source = serverName,
+                  cacheHit = false
+                )
               )
             )
       }
