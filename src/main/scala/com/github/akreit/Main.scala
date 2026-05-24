@@ -51,7 +51,7 @@ object Main extends IOApp with CatsLogger:
         .withHttpApp(Router[IO]("/" -> routes).orNotFound)
         .build
         .use: server =>
-          IO.println(
+          logger.info(
             s"Go to ${server.address}/docs to open SwaggerUI. Stop the process to exit."
           ) *>
             IO.never
