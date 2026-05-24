@@ -8,9 +8,9 @@ import com.github.akreit.model.ErrorResponse
 import com.github.akreit.model.LlmError
 import com.github.akreit.model.Usage
 import com.github.akreit.service.LlmGateway
+import com.github.akreit.service.LlmResult
 import io.opentelemetry.api.OpenTelemetry
 import sttp.ai.claude.models.ContentBlock
-import sttp.ai.claude.responses.MessageResponse
 import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.generic.auto.*
@@ -42,7 +42,7 @@ class Endpoints(llmGateway: LlmGateway) {
     contextEndpoint.serverLogic { request =>
       llmGateway
         .complete(request)
-        .map(_.left.map(mapError).map(constructResponse(request, _)))
+        .map(_.left.map(mapError).map(result => constructResponse(request, result)))
     }
 
   /** propagate llm errors to appropriate HTTP status codes and error messages
@@ -66,8 +66,9 @@ class Endpoints(llmGateway: LlmGateway) {
 
   private def constructResponse(
       request: ClientRequest,
-      llmResponse: MessageResponse
+      llmResult: LlmResult
   ): CompletionResponse =
+    val llmResponse = llmResult.response
     CompletionResponse(
       id = s"cmpl-${request.timestamp}",
       sessionId = request.userId,
@@ -79,35 +80,13 @@ class Endpoints(llmGateway: LlmGateway) {
           case ContentBlock.TextContent(text, _) => text
         }.mkString
       ),
-      // TODO: how can we get this information?
-      toolCallsMade = Nil,
+      toolCallsMade = llmResult.toolCallsMade,
       usage = Usage(
         inputTokens = llmResponse.usage.inputTokens,
         outputTokens = llmResponse.usage.outputTokens,
         totalTokens =
           llmResponse.usage.inputTokens + llmResponse.usage.outputTokens,
-        toolRounds = llmResponse.content.count {
-          case ContentBlock.ToolResultContent(_, _, _) =>
-            println(
-              "Found a tool result content block, counting towards tool rounds"
-            )
-            true
-          case ContentBlock.ToolUseContent(id, name, input) =>
-            println(
-              s"Found a tool use content block for tool '$name', counting towards tool rounds"
-            )
-            false
-          case ContentBlock.TextContent(text, _) =>
-            println(
-              s"Found a text content block with text: $text, not counting towards tool rounds"
-            )
-            false
-          case _ =>
-            println(
-              "Found a content block of an unrecognized type, not counting towards tool rounds"
-            )
-            false
-        }
+        toolRounds = llmResult.toolCallsMade.size
       ),
       finishReason = llmResponse.stopReason.getOrElse("end_turn")
     )

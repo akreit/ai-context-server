@@ -3,11 +3,13 @@ package com.github.akreit.service
 import java.net.http.HttpTimeoutException
 
 import cats.effect.IO
+import cats.effect.Resource
 import cats.syntax.all.*
 import com.github.akreit.config.ClaudeConfig as AppClaudeConfig
 import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.model.ClientRequest
 import com.github.akreit.model.LlmError
+import com.github.akreit.model.ToolCallMade
 import com.github.akreit.utils.CatsLogger
 import sttp.ai.claude.ClaudeClient
 import sttp.ai.claude.config.ClaudeConfig
@@ -18,13 +20,19 @@ import sttp.ai.claude.responses.MessageResponse
 import sttp.client4.Backend
 import sttp.client4.httpclient.cats.HttpClientCatsBackend
 
-/** LLM gateway backed by sttp-ai's Claude module. */
+/** LLM gateway backed by sttp-ai's Claude module.
+ *
+ *  Implements an agent loop that allows Claude to call tools via the MCP registry. Sequence is:
+ *    * *
+ *
+ * */
 class ClaudeLlmGateway(
     client: ClaudeClient,
     model: String,
     maxTokens: Int,
     systemPrompt: Option[String],
-    mcpRegistry: McpRegistry
+    mcpRegistry: McpRegistry,
+    backendResource: Resource[IO, Backend[IO]] = HttpClientCatsBackend.resource[IO]()
 ) extends LlmGateway
     with CatsLogger:
 
@@ -33,19 +41,24 @@ class ClaudeLlmGateway(
     */
   override def complete(
       clientRequest: ClientRequest
-  ): IO[Either[LlmError, MessageResponse]] =
+  ): IO[Either[LlmError, LlmResult]] =
     val mcpServerNames = clientRequest.additionalSources.map(_.map(_.name))
     logger.debug(
       s"complete called: additionalSources=${clientRequest.additionalSources}, mcpServerNames=$mcpServerNames"
     ) >>
       mcpRegistry.toolSpecs(mcpServerNames).flatMap { mcpTools =>
+
+        // map between MCP tool definitions of sttp-ai and mcp java sdk, see issue #3
         val claudeTools = mcpTools.map(_.map(ToolAdapter.fromJavaMcpTool))
-        HttpClientCatsBackend.resource[IO]().use { backend =>
+
+        // execute agent loop recursively
+        backendResource.use { backend =>
           agentLoop(
             messages = List(Message.user(clientRequest.message)),
             tools = claudeTools,
             serverNames = mcpServerNames.getOrElse(Nil),
-            backend = backend
+            backend = backend,
+            accToolCalls = Nil
           ).map(
             _.left.map(error =>
               LlmError.ApiError(statusCode = 0, message = error.getMessage)
@@ -62,13 +75,16 @@ class ClaudeLlmGateway(
   /** Recursive agent loop. Calls Claude, and if it requests tool use, executes
     * the tools via [[McpRegistry]] and recurses with the results appended to
     * the conversation. Terminates when Claude stops requesting tools.
+    *
+    * TODO: investigate if agent loop should only continue when tools are used?
     */
   private def agentLoop(
       messages: List[Message],
       tools: Option[List[sttp.ai.claude.models.Tool]],
       serverNames: List[String],
-      backend: Backend[IO]
-  ): IO[Either[Exception, MessageResponse]] =
+      backend: Backend[IO],
+      accToolCalls: List[ToolCallMade]
+  ): IO[Either[Exception, LlmResult]] =
     val request = MessageRequest(
       model = model,
       system = systemPrompt,
@@ -84,23 +100,28 @@ class ClaudeLlmGateway(
         case Left(error) =>
           logger.error(s"Error response from Claude API: ${error.getMessage}")
         case Right(response) =>
-          logger.info(
-            s"Claude response: stopReason=${response.stopReason}, usage=${response.usage}"
+          logger.debug(
+            s"""Claude response:
+               | response=${response.content.mkString(",")},
+               | stopReason=${response.stopReason},
+               | usage=${response.usage}
+            """.stripMargin
           )
       }
       .flatMap {
         case Left(error) => IO.pure(Left(error))
         case Right(response) if response.stopReason.contains("tool_use") =>
-          executeToolCalls(response, serverNames).flatMap { toolResultMsg =>
+          executeToolCalls(response, serverNames).flatMap { (toolResultMsg, newToolCalls) =>
             agentLoop(
               messages = messages :+ Message
                 .assistant(response.content) :+ toolResultMsg,
               tools = tools,
               serverNames = serverNames,
-              backend = backend
+              backend = backend,
+              accToolCalls = accToolCalls ++ newToolCalls
             )
           }
-        case Right(response) => IO.pure(Right(response))
+        case Right(response) => IO.pure(Right(LlmResult(response, accToolCalls)))
       }
 
   /** Collects all [[ContentBlock.ToolUseContent]] blocks from the response,
@@ -110,7 +131,7 @@ class ClaudeLlmGateway(
   private def executeToolCalls(
       response: MessageResponse,
       serverNames: List[String]
-  ): IO[Message] =
+  ): IO[(Message, List[ToolCallMade])] =
     val toolUses = response.content.collect {
       case t: ContentBlock.ToolUseContent => t
     }
@@ -118,26 +139,34 @@ class ClaudeLlmGateway(
       .traverse { toolUse =>
         val serverName = serverNames.headOption.getOrElse("")
         val args = toolUse.input.map { case (k, v) =>
-          k -> v.toString.asInstanceOf[AnyRef]
+          k -> ToolAdapter.ujsonToJavaArg(v)
         }
         logger.info(
-          s"Executing tool '${toolUse.name}' on server '$serverName'"
+          s"Executing tool '${toolUse.name}' on server '$serverName' with input: ${toolUse.input}"
         ) >>
           mcpRegistry
             .execute(serverName, toolUse.name, args)
             .map(result =>
-              ContentBlock
-                .ToolResultContent(toolUseId = toolUse.id, content = result)
+              (
+                ContentBlock.ToolResultContent(toolUseId = toolUse.id, content = result),
+                ToolCallMade(tool = toolUse.name, source = serverName, cacheHit = false)
+              )
             )
             .handleError(e =>
-              ContentBlock.ToolResultContent(
-                toolUseId = toolUse.id,
-                content = e.getMessage,
-                isError = Some(true)
+              (
+                ContentBlock.ToolResultContent(
+                  toolUseId = toolUse.id,
+                  content = e.getMessage,
+                  isError = Some(true)
+                ),
+                ToolCallMade(tool = toolUse.name, source = serverName, cacheHit = false)
               )
             )
       }
-      .map(results => Message.user(results))
+      .map { pairs =>
+        val (resultBlocks, toolCalls) = pairs.unzip
+        (Message.user(resultBlocks), toolCalls)
+      }
 
 object ClaudeLlmGateway:
 

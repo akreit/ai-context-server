@@ -23,6 +23,7 @@ object ToolCallMade {
   given JsonValueCodec[ToolCallMade] = JsonCodecMaker.make
 }
 
+
 case class Usage(
     inputTokens: Int,
     outputTokens: Int,
