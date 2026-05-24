@@ -9,11 +9,27 @@ import sttp.ai.claude.models.ToolInputSchema
 
 object ToolAdapter:
 
+  /**
+   * Converts a ujson value to a Java object expected by the MCP registry (java client).
+   * TODO: remove this once we switch to the chimp MCP client, see issue #3
+   */
+  def ujsonToJavaArg(v: ujson.Value): AnyRef =
+    v match
+      case ujson.Str(s)  => s
+      case ujson.Num(n)  => java.lang.Double.valueOf(n)
+      case ujson.Bool(b) => java.lang.Boolean.valueOf(b)
+      case ujson.Null    => null
+      case a: ujson.Arr  => a.value.view.map(ujsonToJavaArg).toSeq.asJava
+      case o: ujson.Obj  => o.value.view.map { case (k, v) => k -> ujsonToJavaArg(v) }.toMap.asJava
+
+
   /** Converts an MCP tool specification to a sttp-ai Claude [[Tool.Custom]].
     *
     * [[io.modelcontextprotocol.spec.McpSchema.JsonSchema]] properties are raw
     * Jackson-deserialized `Map[String, Object]` values, so we extract each
     * property's fields by key and map them to a typed [[PropertySchema]].
+    * 
+    * TODO: switch to chimp once MCP client is available, see issue #3
     */
   def fromJavaMcpTool(mcpTool: McpTool): Tool =
     val schema = mcpTool.inputSchema()
