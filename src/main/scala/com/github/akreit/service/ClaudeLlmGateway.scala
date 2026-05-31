@@ -5,6 +5,8 @@ import java.net.http.HttpTimeoutException
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import com.github.akreit.cache.CacheKey
+import com.github.akreit.cache.ToolResultCache
 import com.github.akreit.config.ClaudeConfig as AppClaudeConfig
 import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.model.ClientRequest
@@ -52,21 +54,25 @@ class ClaudeLlmGateway(
 
         // execute agent loop recursively
         backendResource.use { backend =>
-          agentLoop(
-            messages = List(Message.user(clientRequest.message)),
-            tools = claudeTools,
-            serverNames = mcpServerNames.getOrElse(Nil),
-            backend = backend,
-            accToolCalls = Nil
-          ).map(
-            _.left.map(error =>
-              LlmError.ApiError(statusCode = 0, message = error.getMessage)
-            )
-          ).handleError {
-            case e: HttpTimeoutException => Left(LlmError.Timeout(e.getMessage))
-            case e: java.net.ConnectException =>
-              Left(LlmError.ConnectionFailed(e))
-            case e => Left(LlmError.Unexpected(e))
+          ToolResultCache.inMemory.flatMap { cache =>
+            agentLoop(
+              messages = List(Message.user(clientRequest.message)),
+              tools = claudeTools,
+              serverNames = mcpServerNames.getOrElse(Nil),
+              backend = backend,
+              accToolCalls = Nil,
+              cache = cache
+            ).map(
+              _.left.map(error =>
+                LlmError.ApiError(statusCode = 0, message = error.getMessage)
+              )
+            ).handleError {
+              case e: HttpTimeoutException =>
+                Left(LlmError.Timeout(e.getMessage))
+              case e: java.net.ConnectException =>
+                Left(LlmError.ConnectionFailed(e))
+              case e => Left(LlmError.Unexpected(e))
+            }
           }
         }
       }
@@ -82,7 +88,8 @@ class ClaudeLlmGateway(
       tools: Option[List[sttp.ai.claude.models.Tool]],
       serverNames: List[String],
       backend: Backend[IO],
-      accToolCalls: List[ToolCallMade]
+      accToolCalls: List[ToolCallMade],
+      cache: ToolResultCache
   ): IO[Either[Exception, LlmResult]] =
     val request = MessageRequest(
       model = model,
@@ -110,7 +117,7 @@ class ClaudeLlmGateway(
       .flatMap {
         case Left(error) => IO.pure(Left(error))
         case Right(response) if response.stopReason.contains("tool_use") =>
-          executeToolCalls(response, serverNames).flatMap {
+          executeToolCalls(response, serverNames, cache).flatMap {
             (toolResultMsg, newToolCalls) =>
               agentLoop(
                 messages = messages :+ Message
@@ -118,7 +125,8 @@ class ClaudeLlmGateway(
                 tools = tools,
                 serverNames = serverNames,
                 backend = backend,
-                accToolCalls = accToolCalls ++ newToolCalls
+                accToolCalls = accToolCalls ++ newToolCalls,
+                cache = cache
               )
           }
         case Right(response) =>
@@ -131,7 +139,8 @@ class ClaudeLlmGateway(
     */
   private def executeToolCalls(
       response: MessageResponse,
-      serverNames: List[String]
+      serverNames: List[String],
+      cache: ToolResultCache
   ): IO[(Message, List[ToolCallMade])] =
     val toolUses = response.content.collect {
       case t: ContentBlock.ToolUseContent => t
@@ -142,36 +151,62 @@ class ClaudeLlmGateway(
         val args = toolUse.input.map { case (k, v) =>
           k -> ToolAdapter.ujsonToJavaArg(v)
         }
-        logger.info(
-          s"Executing tool '${toolUse.name}' on server '$serverName' with input: ${toolUse.input}"
-        ) >>
-          mcpRegistry
-            .execute(serverName, toolUse.name, args)
-            .map(result =>
-              (
-                ContentBlock
-                  .ToolResultContent(toolUseId = toolUse.id, content = result),
-                ToolCallMade(
-                  tool = toolUse.name,
-                  source = serverName,
-                  cacheHit = false
+        val cacheKey = CacheKey.fromArgs(toolUse.name, args)
+        cache.get(cacheKey).flatMap {
+          case Some(cached) =>
+            logger
+              .info(
+                s"Cache hit for tool '${toolUse.name}' on server '$serverName'"
+              )
+              .as(
+                (
+                  ContentBlock.ToolResultContent(
+                    toolUseId = toolUse.id,
+                    content = cached
+                  ),
+                  ToolCallMade(
+                    tool = toolUse.name,
+                    source = serverName,
+                    cacheHit = true
+                  )
                 )
               )
-            )
-            .handleError(e =>
-              (
-                ContentBlock.ToolResultContent(
-                  toolUseId = toolUse.id,
-                  content = e.getMessage,
-                  isError = Some(true)
-                ),
-                ToolCallMade(
-                  tool = toolUse.name,
-                  source = serverName,
-                  cacheHit = false
+          case None =>
+            logger.info(
+              s"Executing tool '${toolUse.name}' on server '$serverName' with input: ${toolUse.input}"
+            ) >>
+              mcpRegistry
+                .execute(serverName, toolUse.name, args)
+                .flatTap(result => cache.put(cacheKey, result))
+                .map(result =>
+                  (
+                    ContentBlock
+                      .ToolResultContent(
+                        toolUseId = toolUse.id,
+                        content = result
+                      ),
+                    ToolCallMade(
+                      tool = toolUse.name,
+                      source = serverName,
+                      cacheHit = false
+                    )
+                  )
                 )
-              )
-            )
+                .handleError(e =>
+                  (
+                    ContentBlock.ToolResultContent(
+                      toolUseId = toolUse.id,
+                      content = e.getMessage,
+                      isError = Some(true)
+                    ),
+                    ToolCallMade(
+                      tool = toolUse.name,
+                      source = serverName,
+                      cacheHit = false
+                    )
+                  )
+                )
+        }
       }
       .map { pairs =>
         val (resultBlocks, toolCalls) = pairs.unzip
