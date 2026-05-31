@@ -10,6 +10,10 @@
 * before committing, ALWAYS format all changed Scala files using `sbt scalafmtAll` & `sbt scalafmtTestAll`
 * NEVER use non-local returns
 
+# Code style
+
+* always add short but descriptive scaladoc comments to all public methods and classes
+
 # Compile & test Scala project with Metals MCP
 
 * For reference, see: https://github.com/NovaMage/agents-metals-direct-lsp

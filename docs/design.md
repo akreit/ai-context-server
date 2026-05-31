@@ -20,6 +20,37 @@ A middleware server that decouples LLM consumers (chatbot UIs, CLI tools, other 
 
 ---
 
+## Implementation Status
+
+### Done
+- [x] HTTP server — Ember / tapir wired in `Main.scala`
+- [x] `POST /v1/context/completions` — `server/Endpoints.scala`
+- [x] LLM Gateway trait + Anthropic Claude implementation — `service/LlmGateway.scala`, `service/ClaudeLlmGateway.scala`
+- [x] Tool calling loop — embedded in `ClaudeLlmGateway.agentLoop`
+- [x] MCP Registry (stdio clients, tool listing, tool execution) — `mcp/McpRegistry.scala`
+- [x] MCP Tool Adapter (`McpSchema.Tool` → sttp-ai `Tool`) — `service/ToolAdapter.scala`
+- [x] Tool result cache (in-memory, `IORef`-backed) — `cache/ToolResultCache.scala`
+- [x] Configuration (PureConfig / HOCON) — `config/AppConfig.scala` (server, claude, mcp-servers)
+- [x] Request / Response models — `model/` package
+- [x] Context sets enum — `model/ContextSource.scala`
+- [x] OpenAPI / Swagger UI — wired via `SwaggerInterpreter`
+- [x] Basic OTel metrics (tapir request-level) — `Endpoints.metricsInterceptor`
+
+### Not yet started
+- [ ] API key authentication (interceptor + key service)
+- [ ] Session management — PostgreSQL-backed conversation history, TTL sweep
+- [ ] Prompt assembler — system message + history + user message construction
+- [ ] History trimmer — JTokkit token-window trim before prompt assembly
+- [ ] Model router — rules-based HOCON routing (model is currently fixed in config)
+- [ ] Token budget / usage accounting — pre-flight check + post-call recording
+- [ ] Detailed OTel metrics — `caas.tokens.prompt`, `caas.tool.calls_total`, etc.
+- [ ] SSE streaming — `stream: true` path, fs2 → tapir `streamBody`
+- [ ] Admin endpoints — session inspect/delete, MCP server list, model list
+- [ ] Multi-provider LLM support — OpenAI and Ollama (Anthropic only today)
+- [ ] Max-tool-rounds enforcement + `finish_reason: max_rounds_exceeded`
+
+---
+
 ## System Overview
 
 ```
@@ -152,7 +183,7 @@ If `context_sets` is empty, the LLM gets no tools (plain chat completion).
 
 ```
 GET    /v1/admin/sessions/{id}        — inspect session history
-DELETE /v1/admin/sessions/{id}        — clear session + Redis tool cache for session
+DELETE /v1/admin/sessions/{id}        — clear session + tool cache for session
 GET    /v1/admin/mcp-servers          — list configured MCP servers and their tools
 GET    /v1/admin/models               — list available model routes
 ```
@@ -418,62 +449,72 @@ caas {
 
 ## Package Structure
 
+> **Note:** The actual source tree diverges from the design in several places — `api/` split into `server/` and `model/`; `llm/` became `service/`; tool adapter and executor live in `service/` and `mcp/` respectively. Annotations below reflect current state.
+
 ```
 com.github.akreit
-├── Main.scala                        — IOApp, Resource wiring, Ember server
+├── Main.scala                        ✅ IOApp, Resource wiring, Ember server
 │
-├── api/
-│   ├── Endpoints.scala               — tapir endpoint definitions
-│   ├── model/
-│   │   ├── CompletionRequest.scala   — session_id, message, context_sets, model_hint, stream, ...
-│   │   ├── CompletionResponse.scala  — id, session_id, model, message, tool_calls_made, usage
-│   │   ├── ToolCallRecord.scala      — tool, source, cache_hit
-│   │   ├── StreamEvent.scala         — delta (content | tool_call status)
-│   │   └── TokenUsage.scala
-│   └── codec/
-│       └── JsonCodecs.scala          — jsoniter-scala derivations
+├── server/                           (designed as api/)
+│   └── Endpoints.scala               ✅ tapir endpoint definitions
+│
+├── model/                            (designed as api/model/)
+│   ├── ClientRequest.scala           ✅ session_id, message, context_sets, model_hint, stream, ...
+│   ├── CompletionResponse.scala      ✅ id, session_id, model, message, tool_calls_made, usage
+│   ├── ContextSource.scala           ✅ context_sets enum (designed as part of ClientRequest)
+│   ├── ErrorResponse.scala           ✅ error response body
+│   ├── LlmError.scala                ✅ typed LLM error ADT
+│   ├── ToolCallRecord.scala          ❌ (ToolCallMade embedded in CompletionResponse today)
+│   ├── StreamEvent.scala             ❌ SSE delta events — not yet implemented
+│   └── TokenUsage.scala              ❌ (Usage embedded in CompletionResponse today)
+│
+├── api/codec/
+│   └── JsonCodecs.scala              ❌ jsoniter-scala derivations (using auto-derivation today)
 │
 ├── auth/
-│   ├── AuthService.scala             — trait: verify(key) → IO[Either[AuthError, Unit]]
-│   ├── ApiKeyAuthService.scala       — SHA-256 hash lookup
-│   └── AuthInterceptor.scala         — tapir CustomInterceptor
+│   ├── AuthService.scala             ❌ trait: verify(key) → IO[Either[AuthError, Unit]]
+│   ├── ApiKeyAuthService.scala       ❌ SHA-256 hash lookup
+│   └── AuthInterceptor.scala         ❌ tapir CustomInterceptor
 │
 ├── config/
-│   ├── CaasConfig.scala              — PureConfig ADTs
-│   └── ConfigLoader.scala
+│   └── AppConfig.scala               ✅ PureConfig ADTs (server, claude, mcp-servers only)
+│                                        ❌ missing: database, llm-providers, model-routing,
+│                                           sessions, token-budgets, tool-calling sections
 │
 ├── session/
-│   ├── SessionService.scala          — trait: load / save / clear
-│   └── PostgresSessionService.scala  — JSONB, TTL sweep fiber
+│   ├── SessionService.scala          ❌ trait: load / save / clear
+│   └── PostgresSessionService.scala  ❌ JSONB, TTL sweep fiber
 │
 ├── mcp/
-│   ├── McpRegistry.scala             — Map[McpServerName, McpSyncClient]; startup + shutdown
-│   ├── McpToolAdapter.scala          — McpSchema.Tool → sttp-ai ToolSpec
-│   └── McpToolExecutor.scala         — check Redis cache → call MCP → store result
+│   └── McpRegistry.scala             ✅ Map[McpServerName, McpSyncClient]; startup + shutdown,
+│                                        tool listing, tool execution
+│
+├── service/                          (designed as mcp/ + llm/)
+│   ├── LlmGateway.scala             ✅ trait: complete / stream
+│   ├── ClaudeLlmGateway.scala       ✅ sttp-ai Anthropic; tool calling loop embedded here
+│   └── ToolAdapter.scala            ✅ McpSchema.Tool → sttp-ai Tool (designed as McpToolAdapter)
 │
 ├── cache/
-│   ├── ToolResultCache.scala         — trait: get / put
-│   └── InMemoryToolResultCache.scala — IORef[Map[CacheKey, String]] per session
-│
-├── llm/
-│   ├── LLMGateway.scala             — trait: complete / stream
-│   ├── SttpAiLLMGateway.scala       — sttp-ai, all providers
-│   └── ToolCallingLoop.scala        — recursive tool-call resolution, max rounds
+│   └── ToolResultCache.scala         ✅ trait + IORef-backed in-memory implementation
 │
 ├── prompt/
-│   ├── PromptAssembler.scala        — builds Seq[ChatMessage]: system + history + user msg
-│   └── HistoryTrimmer.scala         — JTokkit token-window trim of session history
+│   ├── PromptAssembler.scala         ❌ builds Seq[ChatMessage]: system + history + user msg
+│   └── HistoryTrimmer.scala          ❌ JTokkit token-window trim of session history
 │
-├── model/
-│   ├── ModelRouter.scala            — trait + RulesBasedModelRouter
-│   └── ModelRoute.scala
+├── model/ (routing)
+│   ├── ModelRouter.scala             ❌ trait + RulesBasedModelRouter
+│   └── ModelRoute.scala              ❌
 │
 ├── budget/
-│   ├── BudgetService.scala          — trait: check / record
-│   └── PostgresBudgetService.scala
+│   ├── BudgetService.scala           ❌ trait: check / record
+│   └── PostgresBudgetService.scala   ❌
 │
-└── telemetry/
-    └── Metrics.scala                — OTel counter/histogram definitions
+├── telemetry/
+│   └── Metrics.scala                 ❌ detailed OTel counter/histogram definitions
+│                                        (basic tapir-level metrics exist in Endpoints.scala)
+│
+└── utils/
+    └── CatsLogger.scala              ✅ log4cats helper
 ```
 
 ---
@@ -520,12 +561,11 @@ Removed vs previous: `langchain4j`, `langchain4j-pgvector`, `langchain4j-cohere`
 
 ## Verification Plan
 
-1. **Unit tests:** `RulesBasedModelRouter` (rule evaluation), `HistoryTrimmer` (token math, pair integrity), `McpToolAdapter` (schema conversion). Use Tapir stub4 (already in build.sbt).
-
-2. **Integration tests:** PostgreSQL + Redis via Testcontainers. Test full pipeline with a mock MCP server (spawn a simple stdio process that echoes fixed responses). Assert session history accumulated correctly and Redis cache populated after first tool call, hit on second.
-
-3. **Streaming test:** `curl -N -H "Authorization: Bearer $KEY" -d '{"message":"...","context_sets":["github"],"stream":true}' http://localhost:8080/v1/context/completions` — observe SSE events including tool-call status events.
-
-4. **Cache test:** Same query twice in same session — second request's `tool_calls_made[].cache_hit` must be `true`.
-
-5. **Max rounds test:** Configure `max-tool-rounds = 2`, send a query that would require 5 tool loops — verify response returns with `finish_reason: max_rounds_exceeded` rather than hanging.
+- [ ] **Unit tests: `RulesBasedModelRouter`** — rule evaluation logic
+- [ ] **Unit tests: `HistoryTrimmer`** — token math, pair integrity (requires JTokkit)
+- [x] **Unit tests: `McpToolAdapter`** — schema conversion (`ToolAdapterSpec` exists)
+- [ ] **Integration tests: PostgreSQL** — Testcontainers; full pipeline with mock MCP server (spawn a simple stdio process that echoes fixed responses); assert session history accumulated correctly
+- [ ] **Integration tests: cache** — same query twice in same session; second request's `tool_calls_made[].cache_hit` must be `true`
+- [ ] **Streaming test:** `curl -N -H "Authorization: Bearer $KEY" -d '{"message":"...","context_sets":["github"],"stream":true}' http://localhost:8080/v1/context/completions` — observe SSE events including tool-call status events
+- [ ] **Max rounds test:** configure `max-tool-rounds = 2`, send a query that would require 5 tool loops — verify `finish_reason: max_rounds_exceeded` rather than hanging
+- [ ] **Auth test:** missing or invalid `Authorization` header → 401
