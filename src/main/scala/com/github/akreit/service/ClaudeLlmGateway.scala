@@ -77,9 +77,9 @@ class ClaudeLlmGateway(
         }
       }
 
-  /** Recursive agent loop. Calls Claude, and if it requests tool use, executes
-    * the tools via [[McpRegistry]] and recurses with the results appended to
-    * the conversation. Terminates when Claude stops requesting tools.
+  /** Recursive agent loop that calls Claude and, on `tool_use`, executes tools
+    * via [[McpRegistry]] (consulting `cache` first) and recurses with results
+    * appended. Terminates when Claude returns a non-tool stop reason.
     *
     * TODO: investigate if agent loop should only continue when tools are used?
     */
@@ -136,6 +136,9 @@ class ClaudeLlmGateway(
   /** Collects all [[ContentBlock.ToolUseContent]] blocks from the response,
     * executes each via [[McpRegistry]], and returns a single user message
     * containing all [[ContentBlock.ToolResultContent]] blocks.
+    *
+    * Uses a cache to avoid re-executing tool calls with the same name and
+    * input, keyed by [[CacheKey]].
     */
   private def executeToolCalls(
       response: MessageResponse,
