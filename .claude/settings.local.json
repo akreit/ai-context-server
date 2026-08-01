@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.langchain4j.dev)",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:io.modelcontextprotocol.sdk+a:mcp&rows=1&core=gav\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['response']['docs'][0]['v']\\)\")",
+      "Bash(gh --version)",
+      "Bash(sbt compile *)",
+      "WebFetch(domain:llm4s.org)",
+      "Bash(curl -s http://localhost:55453/mcp -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: 29e80616-2337-422e-9f40-513c98f4698a' -d '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}')",
+      "Bash(curl -s http://localhost:55453/mcp -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: 29e80616-2337-422e-9f40-513c98f4698a' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"compile-full\",\"arguments\":{}}}')"
+    ]
+  }
+}
