@@ -13,20 +13,21 @@
 # Code style
 
 * always add short but descriptive scaladoc comments to all public methods and classes
+* when adding new features, always add unit tests for them. Focus on meaningful tests, not just coverage. Use mocks and stubs to isolate the unit under test.
 
 # Compile & test Scala project with Metals MCP
 
 * For reference, see: https://github.com/NovaMage/agents-metals-direct-lsp
 * intermediate solution until this issue is implemented: https://github.com/anthropics/claude-code/issues/45132
 
-# Start (once per session, runs in background)
+## Start (once per session, runs in background)
 
 ```bash
 METALS_MCP_HOST=http://localhost:55453
 metals-mcp --workspace ~/dev/ai-context-server --port 55453
 ```
 
-# Initialize MCP session
+## Initialize MCP session
 
 ```bash
 SESSION_ID=$(curl -s --dump-header - --output /dev/null $METALS_MCP_HOST/mcp -X POST \
@@ -35,7 +36,7 @@ SESSION_ID=$(curl -s --dump-header - --output /dev/null $METALS_MCP_HOST/mcp -X 
 grep -i "^Mcp-Session-Id:" | awk '{print $2}' | tr -d '\r')
 ```
 
-# Send initialized notification
+## Send initialized notification
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -44,7 +45,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /dev/null
 ```
 
-# Use the server
+## Use the server
 
 > Commands below are examples. Adapt arguments (e.g. `fqcn`, `fileInFocus`, `testClass`) to the actual symbol or file you are working with.
 > Parse the JSON response via the following command piped after each curl:
@@ -53,7 +54,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 `python3 -c "import sys,json,re; m=re.search(r'data: (\{.*\})', sys.stdin.read(), re.DOTALL); print(m and json.loads(m.group(1))['result']['content'][0]['text'])"`
 ```
 
-## compile-full
+### compile-full
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -62,7 +63,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"compile-full","arguments":{}}}'
 ```
 
-## test (by class)
+### test (by class)
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -71,7 +72,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test","arguments":{"testClass":"com.github.akreit.service.ToolAdapterSpec"}}}'
 ```
 
-## inspect (type/symbol)
+### inspect (type/symbol)
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -80,7 +81,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"inspect","arguments":{"fqcn":"com.github.akreit.service.LlmGateway"}}}'
 ```
 
-## get-source
+### get-source
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -89,7 +90,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get-source","arguments":{"fqcn":"com.github.akreit.service.ClaudeLlmGateway"}}}'
 ```
 
-## get-usages
+### get-usages
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
@@ -98,7 +99,7 @@ curl -s $METALS_MCP_HOST/mcp -X POST \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get-usages","arguments":{"fqcn":"com.github.akreit.service.LlmGateway","fileInFocus":"src/main/scala/com/github/akreit/service/ClaudeLlmGateway.scala"}}}'
 ```
 
-## glob-search
+### glob-search
 
 ```bash
 curl -s $METALS_MCP_HOST/mcp -X POST \
