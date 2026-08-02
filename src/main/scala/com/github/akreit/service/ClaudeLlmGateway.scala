@@ -133,9 +133,9 @@ class ClaudeLlmGateway(
           IO.pure(Right(LlmResult(response, accToolCalls)))
       }
 
-  /** Collects all [[ContentBlock.ToolUseContent]] blocks from the response,
-    * executes each via [[McpRegistry]], and returns a single user message
-    * containing all [[ContentBlock.ToolResultContent]] blocks.
+  /** Collects all [[ContentBlock.ToolUse]] blocks from the response, executes
+    * each via [[McpRegistry]], and returns a single user message containing all
+    * [[ContentBlock.ToolResult]] blocks.
     *
     * Uses a cache to avoid re-executing tool calls with the same name and
     * input, keyed by [[CacheKey]].
@@ -145,8 +145,8 @@ class ClaudeLlmGateway(
       serverNames: List[String],
       cache: ToolResultCache
   ): IO[(Message, List[ToolCallMade])] =
-    val toolUses = response.content.collect {
-      case t: ContentBlock.ToolUseContent => t
+    val toolUses = response.content.collect { case t: ContentBlock.ToolUse =>
+      t
     }
     toolUses
       .traverse { toolUse =>
@@ -163,7 +163,7 @@ class ClaudeLlmGateway(
               )
               .as(
                 (
-                  ContentBlock.ToolResultContent(
+                  ContentBlock.ToolResult(
                     toolUseId = toolUse.id,
                     content = cached
                   ),
@@ -184,7 +184,7 @@ class ClaudeLlmGateway(
                 .map(result =>
                   (
                     ContentBlock
-                      .ToolResultContent(
+                      .ToolResult(
                         toolUseId = toolUse.id,
                         content = result
                       ),
@@ -197,7 +197,7 @@ class ClaudeLlmGateway(
                 )
                 .handleError(e =>
                   (
-                    ContentBlock.ToolResultContent(
+                    ContentBlock.ToolResult(
                       toolUseId = toolUse.id,
                       content = e.getMessage,
                       isError = Some(true)

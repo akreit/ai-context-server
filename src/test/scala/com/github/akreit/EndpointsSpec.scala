@@ -31,7 +31,7 @@ class EndpointsSpec extends AnyFlatSpec with Matchers with EitherValues:
             `type` = "message",
             role = "assistant",
             content = List(
-              ContentBlock.TextContent("This is some response from the llm")
+              ContentBlock.Text("This is some response from the llm")
             ),
             model = "claude-sonnet-4-20250514",
             stopReason = Some("end_turn"),

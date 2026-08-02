@@ -8,6 +8,7 @@ import cats.effect.unsafe.implicits.global
 import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.model.ClientRequest
 import com.github.akreit.model.ContextSource
+import io.circe.Json
 import io.modelcontextprotocol.spec.McpSchema
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -48,19 +49,14 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
         "description" -> "Max results to return"
       ).asJava.asInstanceOf[Object]
     ).asJava
-    val inputSchema = McpSchema.JsonSchema(
-      "object",
-      properties,
-      List("query").asJava,
-      null,
-      null,
-      null
-    )
+    val inputSchema: java.util.Map[String, Object] = Map[String, Object](
+      "type" -> "object",
+      "properties" -> properties,
+      "required" -> List("query").asJava
+    ).asJava
     McpSchema.Tool
-      .builder()
-      .name("search")
+      .builder("search", inputSchema)
       .description("Search GitHub for PRs and issues")
-      .inputSchema(inputSchema)
       .build()
 
   // First Claude response: requests a tool call
@@ -69,11 +65,13 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
     `type` = "message",
     role = "assistant",
     content = List(
-      ContentBlock.ToolUseContent(
+      ContentBlock.ToolUse(
         id = "tool-1",
         name = "search",
-        input =
-          Map("query" -> ujson.Str("user:akreit"), "limit" -> ujson.Num(5))
+        input = Map(
+          "query" -> Json.fromString("user:akreit"),
+          "limit" -> Json.fromDoubleOrNull(5)
+        )
       )
     ),
     model = "claude-sonnet-4-20250514",
@@ -87,7 +85,7 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
     id = "msg-2",
     `type` = "message",
     role = "assistant",
-    content = List(ContentBlock.TextContent("Search complete")),
+    content = List(ContentBlock.Text("Search complete")),
     model = "claude-sonnet-4-20250514",
     stopReason = Some("end_turn"),
     stopSequence = None,
@@ -165,6 +163,6 @@ class ClaudeLlmGatewaySpec extends AnyFlatSpec with Matchers:
     result.map(_.response.id) shouldBe Right("msg-2")
     result.map(_.response.stopReason) shouldBe Right(Some("end_turn"))
     result.map(_.response.content) shouldBe Right(
-      List(ContentBlock.TextContent("Search complete"))
+      List(ContentBlock.Text("Search complete"))
     )
   }

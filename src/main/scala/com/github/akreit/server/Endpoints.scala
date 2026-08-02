@@ -79,7 +79,7 @@ class Endpoints(llmGateway: LlmGateway) {
       message = AssistantMessage(
         role = "assistant",
         content = llmResponse.content.collect {
-          case ContentBlock.TextContent(text, _) => text
+          case ContentBlock.Text(text, _, _) => text
         }.mkString
       ),
       toolCallsMade = llmResult.toolCallsMade,
