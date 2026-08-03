@@ -1,3 +1,3 @@
 # Usage
 
-Make sure to read `AGENTS.md` and respect its content.
+Please refer to the `AGENTS.md` file for detailed instructions on how to use the CLAUDE agent.

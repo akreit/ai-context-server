@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "ai-context-server-metals": {
+      "url": "http://localhost:55453/mcp",
+      "type": "http"
+    }
+  }
+}

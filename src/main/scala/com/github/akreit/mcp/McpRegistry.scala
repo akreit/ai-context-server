@@ -82,7 +82,10 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
     clients.get(serverName) match
       case Some(client) =>
         IO.blocking {
-          val request = new McpSchema.CallToolRequest(toolName, args.asJava)
+          val request = McpSchema.CallToolRequest
+            .builder(toolName)
+            .arguments(args.asJava)
+            .build()
           val result = client.callTool(request)
           result.content.asScala
             .collect { case t: McpSchema.TextContent =>
