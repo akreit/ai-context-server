@@ -59,6 +59,7 @@ services:
       - ./scripts/mitmproxy_addon_claude.py:/scripts/mitmproxy_addon_claude.py:ro
       - ./scripts/mitmproxy_addon_common.py:/scripts/mitmproxy_addon_common.py:ro
       - ~/.config/sandcat/settings.json:/config/settings.json:ro
+      - ../../.sandcat:/config/project:ro
     healthcheck:
       # dns.conf is written (last) by the addon's load() hook and cleared by
       # the entrypoint above on each start, so gating on its presence means

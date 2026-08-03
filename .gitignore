@@ -22,3 +22,7 @@ project/project
 
 # Secrets etc.
 .env
+
+# cellar local cache/state (keep .cellar/cellar.conf)
+.cellar/cache/
+.cellar/.telemetry-seen

@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/base:debian
 
 # ca-certificates, curl, git are already in the devcontainers base image.
+# cellar:   VirtusLab's CLI for looking up method / class / symbol definitions in Java and Scala codebases
 # fd-find:  fast file finder (aliased to fd below)
 # fzf:      fuzzy finder for files and command history
 # gh:       GitHub CLI (official apt repo for newer releases)
@@ -14,6 +15,9 @@ RUN apt-get update \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && curl -fL -O https://github.com/VirtusLab/cellar/releases/download/v0.1.0-M10/cellar-0.1.0-M10-linux-x86_64.tar.gz \
+    && tar xz -f cellar-*.tar.gz \
+    && sudo mv cellar /usr/local/bin/ \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
