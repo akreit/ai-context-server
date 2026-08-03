@@ -1,3 +1,3 @@
 # Usage
 
-For Scala development rules, the global `scala` skill is loaded automatically. See `AGENTS.md` for any project-specific additions.
+Please refer to the `AGENTS.md` file for detailed instructions on how to use the CLAUDE agent.
