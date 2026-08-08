@@ -1,32 +1,31 @@
 package com.github.akreit.mcp
 
-import scala.jdk.CollectionConverters.*
-
 import cats.data.OptionT
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
+import chimp.client.McpClient
+import chimp.client.transport.ClientStdioTransport
+import chimp.protocol.Implementation
+import chimp.protocol.ToolContent
+import chimp.protocol.ToolDefinition
 import com.github.akreit.config.McpServerConfig
 import com.github.akreit.utils.CatsLogger
-import io.modelcontextprotocol.client.McpClient
-import io.modelcontextprotocol.client.McpSyncClient
-import io.modelcontextprotocol.client.transport.ServerParameters
-import io.modelcontextprotocol.client.transport.StdioClientTransport
-import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapperSupplier
-import io.modelcontextprotocol.spec.McpSchema
+import io.circe.Json
+import sttp.shared.Identity
 
 /** Registry for MCP clients, which are initialized based on the application
   * config and provide methods to list available tools and execute them. Uses
-  * the Java SDK's [[McpSyncClient]] model, but yields asynchronous APIs with
-  * [[cats.effect.IO]] for better integration with the rest of the application
-  * and to avoid blocking operations on the main execution context.
+  * chimp's synchronous [[McpClient]][[[Identity]]], but yields asynchronous
+  * APIs with [[cats.effect.IO]] for better integration with the rest of the
+  * application and to avoid blocking operations on the main execution context.
   *
   * @param clients
   *   represented as a map of logical server names to their corresponding MCP
   *   clients, allowing for multiple MCP servers to be configured and used in
   *   the application.
   */
-class McpRegistry(private val clients: Map[String, McpSyncClient])
+class McpRegistry(private val clients: Map[String, McpClient[Identity]])
     extends CatsLogger:
 
   /** Retrieve the list of available tools from all configured MCP clients.
@@ -42,7 +41,7 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
     */
   def toolSpecs(
       serverNames: Option[List[String]]
-  ): IO[Option[List[McpSchema.Tool]]] =
+  ): IO[Option[List[ToolDefinition]]] =
     logger.debug(s"toolSpecs called with serverNames=$serverNames") >>
       (for
         names <- OptionT.fromOption[IO](serverNames)
@@ -50,7 +49,7 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
           clients.get(name) match
             case Some(client) =>
               logger.info(s"Fetching tool specs from MCP client: $name") >>
-                IO.blocking(client.listTools().tools.asScala.toList)
+                IO.blocking(client.listTools().tools)
             case None =>
               logger.warn(s"No MCP client configured for: $name").as(Nil)
         })
@@ -66,10 +65,9 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
     * @param toolName
     *   name of the tool to execute, which should be one of the tools listed by
     *   the `toolSpecs` method for the specified server
-    * @param args
-    *   arguments to pass to the tool, represented as a map of string keys to
-    *   arbitrary values. The structure and content of this map will depend on
-    *   the specific tool being executed and its expected input parameters.
+    * @param arguments
+    *   arguments to pass to the tool, represented as a JSON object matching the
+    *   tool's declared input schema.
     * @return
     *   an effectful string containing the result of the tool execution, which
     *   may include the tool's output or any error messages.
@@ -77,20 +75,14 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
   def execute(
       serverName: String,
       toolName: String,
-      args: Map[String, AnyRef]
+      arguments: Json
   ): IO[String] =
     clients.get(serverName) match
       case Some(client) =>
         IO.blocking {
-          val request = McpSchema.CallToolRequest
-            .builder(toolName)
-            .arguments(args.asJava)
-            .build()
-          val result = client.callTool(request)
-          result.content.asScala
-            .collect { case t: McpSchema.TextContent =>
-              t.text
-            }
+          val result = client.callTool(toolName, arguments)
+          result.content
+            .collect { case t: ToolContent.Text => t.text }
             .mkString("\n")
         }
       case None =>
@@ -102,6 +94,11 @@ class McpRegistry(private val clients: Map[String, McpSyncClient])
   * application config, which may contain 1...n MCP server definitions
   */
 object McpRegistry extends CatsLogger:
+
+  private val clientInfo = Implementation(
+    name = "ai-context-server",
+    version = "0.1.0"
+  )
 
   def build(configs: Map[String, McpServerConfig]): Resource[IO, McpRegistry] =
     configs.toList
@@ -125,25 +122,15 @@ object McpRegistry extends CatsLogger:
   private def clientResource(
       name: String,
       cfg: McpServerConfig
-  ): Resource[IO, McpSyncClient] =
+  ): Resource[IO, McpClient[Identity]] =
     Resource.make(
       logger.info(
         s"Initializing MCP client '$name' with command: ${cfg.command}"
       ) >>
         IO.blocking {
-          val params =
-            ServerParameters
-              .builder(cfg.command)
-              .args(cfg.args.asJava)
-              .env(cfg.env.asJava)
-              .build()
-          val transport = new StdioClientTransport(
-            params,
-            new JacksonMcpJsonMapperSupplier().get()
-          )
-          val client = McpClient.sync(transport).build()
-          client.initialize()
-          client
+          val transport =
+            ClientStdioTransport(cfg.command :: cfg.args, cfg.env)
+          McpClient[Identity](transport, clientInfo)
         }
     )(client =>
       IO.blocking(client.close())

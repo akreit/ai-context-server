@@ -40,8 +40,7 @@ lazy val rootProject = (project in file(".")).settings(
       "com.softwaremill.sttp.ai"              %% "fs2"                                       % "0.5.6",
       "com.softwaremill.sttp.client4"         %% "cats"                                      % sttpVersion,
       "org.virtuslab"                          % "orca-claude_3"                             % "0.1.3",
-      // TODO: Remove this dependency and replace with chimp
-      "io.modelcontextprotocol.sdk"            % "mcp"                                       % "2.0.0",
+      "com.softwaremill.chimp"                %% "chimp-client"                              % "0.5.0",
       "com.softwaremill.sttp.tapir"           %% "tapir-sttp-stub4-server"                   % tapirVersion % Test,
       "org.scalatest"                         %% "scalatest"                                 % "3.2.20" % Test
     )
