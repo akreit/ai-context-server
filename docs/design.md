@@ -14,7 +14,7 @@ A middleware server that decouples LLM consumers (chatbot UIs, CLI tools, other 
 - Stateful sessions — server holds conversation history in PostgreSQL (JSONB)
 - API-key authentication only (single-tenant); straightforward path to multi-tenant later
 - MCP client only (stdio transport; does not expose itself as MCP server)
-- Official MCP Java SDK for MCP client (lighter than LangChain4j; no RAG baggage)
+- [chimp](https://github.com/softwaremill/chimp) for MCP client (Scala 3, Tapir/sttp-based; originally the official MCP Java SDK, replaced once `chimp-client` landed on Maven Central — see issue #3)
 - sttp-ai for all LLM calls (non-negotiable)
 - Scala 3.8.3 + tapir 1.13.19 + http4s Ember + Cats Effect (existing skeleton)
 
@@ -28,7 +28,7 @@ A middleware server that decouples LLM consumers (chatbot UIs, CLI tools, other 
 - [x] LLM Gateway trait + Anthropic Claude implementation — `service/LlmGateway.scala`, `service/ClaudeLlmGateway.scala`
 - [x] Tool calling loop — embedded in `ClaudeLlmGateway.agentLoop`
 - [x] MCP Registry (stdio clients, tool listing, tool execution) — `mcp/McpRegistry.scala`
-- [x] MCP Tool Adapter (`McpSchema.Tool` → sttp-ai `Tool`) — `service/ToolAdapter.scala`
+- [x] MCP Tool Adapter (`chimp.protocol.ToolDefinition` → sttp-ai `Tool`) — `claude/ToolAdapter.scala`
 - [x] Tool result cache (in-memory, `IORef`-backed) — `cache/ToolResultCache.scala`
 - [x] Configuration (PureConfig / HOCON) — `config/AppConfig.scala` (server, claude, mcp-servers)
 - [x] Request / Response models — `model/` package
@@ -143,12 +143,12 @@ OpenAPI spec at `/docs` (Swagger UI already wired in existing skeleton).
 
 **`context_sets` enum — which MCP tool servers to activate:**
 
-| Value | MCP server | Tools made available to LLM |
-|---|---|---|
-| `jira` | Jira MCP (stdio) | `search_issues`, `get_issue`, `list_projects`, ... |
-| `github` | GitHub MCP (stdio) | `search_code`, `list_pull_requests`, `get_issue`, ... |
-| `repo-docs` | Filesystem or docs MCP | `read_file`, `list_directory`, `search_files` |
-| `support-tickets` | Zendesk/Freshdesk MCP | `search_tickets`, `get_ticket`, ... |
+| Value             | MCP server             | Tools made available to LLM                           |
+|-------------------|------------------------|-------------------------------------------------------|
+| `jira`            | Jira MCP (stdio)       | `search_issues`, `get_issue`, `list_projects`, ...    |
+| `github`          | GitHub MCP (stdio)     | `search_code`, `list_pull_requests`, `get_issue`, ... |
+| `repo-docs`       | Filesystem or docs MCP | `read_file`, `list_directory`, `search_files`         |
+| `support-tickets` | Zendesk/Freshdesk MCP  | `search_tickets`, `get_ticket`, ...                   |
 
 If `context_sets` is empty, the LLM gets no tools (plain chat completion).
 
@@ -194,18 +194,16 @@ Removed: `/v1/context/retrieve` and document ingest endpoints (no RAG, no vector
 
 ## Library Choices
 
-### MCP client: Official MCP Java SDK
-
-**Why not LangChain4j-mcp:** LangChain4j-mcp is a wrapper around the official SDK anyway, and it pulls in LangChain4j core — a large dependency we no longer need since there's no RAG. The official SDK is lighter and directly maintained by the MCP project.
+### MCP client: chimp
 
 ```scala
-"io.modelcontextprotocol.sdk" % "mcp"            % "0.9.0",
-"io.modelcontextprotocol.sdk" % "mcp-spring-webflux" % "0.9.0",  // for HTTP MCP; stdio uses core only
+"com.softwaremill.chimp" %% "chimp-client" % "0.5.0",
 ```
 
-The SDK provides synchronous and async facades. We use `McpSyncClient` wrapped in `IO.blocking`. At startup, one `McpSyncClient` per configured MCP server is initialized in the `Resource` graph and held in `McpRegistry`.
+We use [chimp](https://github.com/softwaremill/chimp) as a simple and scala-native mcp client. Chimp's `ClientStdioTransport` is synchronous (`sttp.shared.Identity`). At startup, one `McpClient[Identity]` per configured MCP server is initialized in the `Resource` graph and held in `McpRegistry`.
+So far, chimp has no cats-effect integration (only Ox and ZIO async transports exist), so we use `IO.blocking` to still benefit from cats-effects' async behaviour.
 
-**Tool spec bridging:** MCP tool specs are JSON Schema objects (`McpSchema.Tool`). sttp-ai expects its own `ToolSpecification` type. A thin `McpToolAdapter` converts between them — this is manual but straightforward (name + description + JSON schema are present in both).
+**Tool spec bridging:** MCP tool specs are JSON Schema objects (`chimp.protocol.ToolDefinition`, with `inputSchema: circe.Json`). sttp-ai expects its own `Tool` type. A thin `ToolAdapter` converts between them — see "MCP tool adapter" below.
 
 ### sttp-ai (LLM calls)
 
@@ -228,7 +226,8 @@ Per-session cache to avoid redundant MCP calls within a conversation.
 - **Implementation:** `IORef[Map[CacheKey, String]]` per session, held in the session's fiber scope
 - **Lifetime:** process lifetime — cache is intentionally ephemeral; a restart serving fresh MCP data is preferable to serving stale cached results
 
-**Why not PostgreSQL or Redis:** The cache's purpose is intra-session deduplication within a single conversation. Tool results (Jira issues, GitHub PRs) change over time, so persisting them across restarts risks serving stale data to the LLM. In-memory naturally expires with the process, which aligns with "data was fresh when this conversation was active." The `ToolResultCache` trait keeps the door open to swap implementations if cross-process sharing is ever needed.
+**Why not PostgreSQL or Redis:** The cache's purpose is intra-session deduplication within a single conversation. Tool results (Jira issues, GitHub PRs) change over time, so persisting them across restarts risks serving stale data to the LLM.
+In-memory naturally expires with the process, which aligns with "data was fresh when this conversation was active." The `ToolResultCache` trait keeps the door open to swap implementations if cross-process sharing is ever needed.
 
 ### Token counting: JTokkit (standalone)
 
@@ -270,13 +269,16 @@ This lets subsequent turns in the same session reference previous tool results w
 
 ### MCP Registry
 
-At startup, `McpRegistry` reads the configured MCP servers from HOCON and initializes one `McpSyncClient` per server:
+At startup, `McpRegistry` reads the configured MCP servers from HOCON and initializes one chimp `McpClient[Identity]` per server (chimp's `ClientStdioTransport` is synchronous, so calls are wrapped in `IO.blocking` — same pattern as the Java SDK's `McpSyncClient` it replaced):
 
 ```scala
 def buildMcpRegistry(config: CaasConfig): Resource[IO, McpRegistry] =
   config.mcpServers.toList.traverse { (name, cfg) =>
     Resource.make(
-      IO.blocking(McpClient.sync(new StdioClientTransport(cfg.command, cfg.args)))
+      IO.blocking {
+        val transport = ClientStdioTransport(cfg.command :: cfg.args, cfg.env)
+        McpClient[Identity](transport, Implementation("ai-context-server", "0.1.0"))
+      }
     )(client => IO.blocking(client.close()))
       .map(name -> _)
   }.map(pairs => McpRegistry(pairs.toMap))
@@ -310,15 +312,24 @@ def completionLoop(
 
 ### MCP tool adapter
 
+chimp's `ToolDefinition.inputSchema` is already a JSON Schema encoded as circe `Json`, so the adapter (`ToolAdapter.fromChimpTool`) walks it with the cursor API to build sttp-ai's typed `ToolInputSchema`/`PropertySchema` (`type`/`properties`/`required`, and `type`/`description`/`enum` per property):
+
 ```scala
-object McpToolAdapter:
-  def toSttpAiTool(mcpTool: McpSchema.Tool): ToolSpec =
-    ToolSpec(
-      name        = mcpTool.name,
-      description = mcpTool.description,
-      inputSchema = mcpTool.inputSchema  // already JSON Schema — direct pass-through
+object ToolAdapter:
+  def fromChimpTool(tool: ToolDefinition): Tool =
+    val cursor = tool.inputSchema.hcursor
+    Tool(
+      name        = tool.name,
+      description = tool.description.getOrElse(""),
+      inputSchema = ToolInputSchema(
+        `type`     = cursor.get[String]("type").getOrElse("object"),
+        properties = /* per-property cursor walk → PropertySchema */,
+        required   = cursor.get[List[String]]("required").toOption
+      )
     )
 ```
+
+**Known limitation:** this only captures `type`/`description`/`enum` per property, silently dropping anything a real MCP tool's schema might have beyond that (nested objects, array `items`, `additionalProperties`, `oneOf`, ...). sttp-ai's `Tool.customRaw(name, description, inputSchema: Json)` accepts a raw JSON Schema and serializes it to `input_schema` identically to the typed path — passing `tool.inputSchema` straight through via `customRaw` would both simplify the adapter and fix this gap. Tracked as a follow-up, not yet applied.
 
 ---
 
@@ -486,13 +497,17 @@ com.github.akreit
 │   └── PostgresSessionService.scala  ❌ JSONB, TTL sweep fiber
 │
 ├── mcp/
-│   └── McpRegistry.scala             ✅ Map[McpServerName, McpSyncClient]; startup + shutdown,
-│                                        tool listing, tool execution
+│   └── McpRegistry.scala             ✅ Map[McpServerName, chimp McpClient[Identity]]; startup +
+│                                        shutdown, tool listing, tool execution
 │
 ├── service/                          (designed as mcp/ + llm/)
-│   ├── LlmGateway.scala             ✅ trait: complete / stream
+│   └── LlmGateway.scala             ✅ provider-agnostic trait: complete / stream
+│
+├── claude/                           (not in original design — split out once ToolAdapter
+│                                        turned out to be Claude-specific; a future OpenAI/Ollama
+│                                        gateway would get its own sibling package + adapter)
 │   ├── ClaudeLlmGateway.scala       ✅ sttp-ai Anthropic; tool calling loop embedded here
-│   └── ToolAdapter.scala            ✅ McpSchema.Tool → sttp-ai Tool (designed as McpToolAdapter)
+│   └── ToolAdapter.scala            ✅ chimp ToolDefinition → sttp-ai claude.models.Tool
 │
 ├── cache/
 │   └── ToolResultCache.scala         ✅ trait + IORef-backed in-memory implementation
@@ -522,8 +537,8 @@ com.github.akreit
 ## Dependency Additions to build.sbt
 
 ```scala
-// MCP client (official SDK)
-"io.modelcontextprotocol.sdk" % "mcp"            % "0.9.0",
+// MCP client (chimp; originally the official MCP Java SDK, see issue #3)
+"com.softwaremill.chimp" %% "chimp-client"        % "0.5.0",
 
 // sttp-ai (OpenAI + Anthropic + fs2 streaming)
 "com.softwaremill.sttp.ai" %% "sttp-openai"       % "0.4.0",
@@ -545,9 +560,9 @@ Removed vs previous: `langchain4j`, `langchain4j-pgvector`, `langchain4j-cohere`
 
 ## Open Questions / Risks
 
-1. **Official MCP Java SDK + stdio on JVM.** Verify the SDK's `StdioClientTransport` correctly manages subprocess lifecycle on JVM (process spawn, stdout/stdin piping, cleanup on `Resource` release). This is the highest-risk unknown — prototype before anything else.
+1. ~~**MCP client + stdio on JVM.**~~ **Resolved.** Prototyped and shipped with the official MCP Java SDK's `StdioClientTransport` first, then replaced with chimp's `ClientStdioTransport` (issue #3) once it was available on Maven Central — both manage subprocess lifecycle correctly via `Resource`.
 
-2. **sttp-ai tool spec format.** Confirm the exact type sttp-ai uses for tool definitions when calling Anthropic vs OpenAI — the provider wire formats differ (Anthropic uses `input_schema`, OpenAI uses `parameters`). sttp-ai should abstract this, but verify. The `McpToolAdapter` needs to know what type to produce.
+2. **sttp-ai tool spec format.** `claude/ToolAdapter` always produces `sttp.ai.claude.models.Tool` (Claude-specific — the only provider implemented today; it and `ClaudeLlmGateway` were split into their own `claude/` package for exactly this reason). Confirmed via the sttp-ai source: `Tool.Custom`/`Tool.CustomRaw` both encode to Anthropic's `input_schema` field. When OpenAI/Ollama support is added (see "Not yet started"), each provider gets its own sibling package (`openai/`, `ollama/`) with its own tool adapter, since OpenAI's wire format uses `parameters` instead of `input_schema` — verify sttp-ai abstracts this before assuming the adapters can share code.
 
 3. **Tool result cache is in-memory only.** Cache is lost on restart; MCP re-call is the fallback. This is intentional — tool results (Jira, GitHub) change over time and serving stale cached data post-restart is worse than a fresh MCP call. If horizontal scaling or cross-process cache sharing is ever needed, the `ToolResultCache` trait allows swapping in a Redis implementation without touching call sites.
 

@@ -3,10 +3,10 @@ package com.github.akreit
 import cats.effect.ExitCode
 import cats.effect.IO
 import cats.effect.IOApp
+import com.github.akreit.claude.ClaudeLlmGateway
 import com.github.akreit.config.AppConfig
 import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.server.Endpoints
-import com.github.akreit.service.ClaudeLlmGateway
 import com.github.akreit.utils.CatsLogger
 import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
 import org.http4s.ember.server.EmberServerBuilder

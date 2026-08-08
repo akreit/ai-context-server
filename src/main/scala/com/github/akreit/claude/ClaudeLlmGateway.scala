@@ -1,4 +1,4 @@
-package com.github.akreit.service
+package com.github.akreit.claude
 
 import java.net.http.HttpTimeoutException
 
@@ -12,6 +12,8 @@ import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.model.ClientRequest
 import com.github.akreit.model.LlmError
 import com.github.akreit.model.ToolCallMade
+import com.github.akreit.service.LlmGateway
+import com.github.akreit.service.LlmResult
 import com.github.akreit.utils.CatsLogger
 import io.circe.Json
 import sttp.ai.claude.ClaudeClient

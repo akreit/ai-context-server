@@ -1,4 +1,4 @@
-package com.github.akreit.service
+package com.github.akreit.claude
 
 import cats.effect.IO
 import cats.effect.Resource

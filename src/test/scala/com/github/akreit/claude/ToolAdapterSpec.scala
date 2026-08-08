@@ -1,4 +1,4 @@
-package com.github.akreit.service
+package com.github.akreit.claude
 
 import chimp.protocol.ToolDefinition
 import io.circe.Json
