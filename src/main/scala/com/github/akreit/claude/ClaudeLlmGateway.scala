@@ -154,11 +154,15 @@ class ClaudeLlmGateway(
     toolUses
       .traverse { toolUse =>
         val serverName = serverNames.headOption.getOrElse("")
-val args = toolUse.input
-val cacheKey = CacheKey.fromArgs(
-  toolUse.name,
-  args.view.mapValues(v => io.circe.Printer.noSpaces.copy(sortKeys = true).print(v)).toMap
-)
+        val args = toolUse.input
+        val cacheKey = CacheKey.fromArgs(
+          toolUse.name,
+          args.view
+            .mapValues(v =>
+              io.circe.Printer.noSpaces.copy(sortKeys = true).print(v)
+            )
+            .toMap
+        )
         cache.get(cacheKey).flatMap {
           case Some(cached) =>
             logger
