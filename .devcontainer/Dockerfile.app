@@ -43,6 +43,7 @@ ENV PATH="/home/vscode/.local/bin:/home/vscode/.local/share/mise/shims:$PATH"
 ENV LANG="en_US.UTF-8"
 
 # Development stacks (managed by sandcat init --stacks):
+RUN mise use -g bun@latest
 RUN mise use -g java@lts
 RUN mise use -g scala@latest && mise use -g sbt@latest && mise use -g scala-cli@latest
 # END STACKS
