@@ -1,4 +1,4 @@
-package com.github.akreit.service
+package com.github.akreit.claude
 
 import java.net.http.HttpTimeoutException
 
@@ -12,7 +12,10 @@ import com.github.akreit.mcp.McpRegistry
 import com.github.akreit.model.ClientRequest
 import com.github.akreit.model.LlmError
 import com.github.akreit.model.ToolCallMade
+import com.github.akreit.service.LlmGateway
+import com.github.akreit.service.LlmResult
 import com.github.akreit.utils.CatsLogger
+import io.circe.Json
 import sttp.ai.claude.ClaudeClient
 import sttp.ai.claude.config.ClaudeConfig
 import sttp.ai.claude.models.ContentBlock
@@ -49,8 +52,8 @@ class ClaudeLlmGateway(
       s"complete called: additionalSources=${clientRequest.additionalSources}, mcpServerNames=$mcpServerNames"
     ) >>
       mcpRegistry.toolSpecs(mcpServerNames).flatMap { mcpTools =>
-        // map between MCP tool definitions of sttp-ai and mcp java sdk, see issue #3
-        val claudeTools = mcpTools.map(_.map(ToolAdapter.fromJavaMcpTool))
+        // map between MCP tool definitions of sttp-ai and chimp
+        val claudeTools = mcpTools.map(_.map(ToolAdapter.fromChimpTool))
 
         // execute agent loop recursively
         backendResource.use { backend =>
@@ -151,10 +154,15 @@ class ClaudeLlmGateway(
     toolUses
       .traverse { toolUse =>
         val serverName = serverNames.headOption.getOrElse("")
-        val args = toolUse.input.map { case (k, v) =>
-          k -> ToolAdapter.ujsonToJavaArg(v)
-        }
-        val cacheKey = CacheKey.fromArgs(toolUse.name, args)
+        val args = toolUse.input
+        val cacheKey = CacheKey.fromArgs(
+          toolUse.name,
+          args.view
+            .mapValues(v =>
+              io.circe.Printer.noSpaces.copy(sortKeys = true).print(v)
+            )
+            .toMap
+        )
         cache.get(cacheKey).flatMap {
           case Some(cached) =>
             logger
@@ -179,7 +187,7 @@ class ClaudeLlmGateway(
               s"Executing tool '${toolUse.name}' on server '$serverName' with input: ${toolUse.input}"
             ) >>
               mcpRegistry
-                .execute(serverName, toolUse.name, args)
+                .execute(serverName, toolUse.name, Json.fromFields(args))
                 .flatTap(result => cache.put(cacheKey, result))
                 .map(result =>
                   (
