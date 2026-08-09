@@ -2,7 +2,6 @@
   "network": [
     { "action": "allow", "host": "*", "method": "GET" },
     { "action": "allow", "host": "repo1.maven.org", "method": "HEAD" },
-    { "action": "allow", "host": "repo.maven.apache.org", "method": "HEAD" },
-    { "action": "allow", "host": "api.githubcopilot.com", "method": "POST" }
+    { "action": "allow", "host": "repo.maven.apache.org", "method": "HEAD" }
   ]
 }
