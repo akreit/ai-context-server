@@ -28,8 +28,20 @@ case class ClaudeConfig(
     systemPrompt: Option[String] = None
 ) derives ConfigReader
 
+/** Configuration for a single MCP server. Either `command` (local stdio
+  * subprocess) or `url` (remote HTTP server) must be set; `args`/`env` only
+  * apply to the former, `headers` only to the latter.
+  *
+  * Fields other than `command`/`url` are `Option` rather than defaulted
+  * collections: pureconfig's native Scala 3 `derives ConfigReader` ignores
+  * constructor default values (only `ReadsMissingKeys` types like `Option`
+  * default when a key is absent), so a bare `List`/`Map` default would still
+  * fail with "Key not found" if omitted from the config.
+  */
 case class McpServerConfig(
-    command: String,
-    args: List[String],
-    env: Map[String, String] = Map.empty
+    command: Option[String],
+    args: Option[List[String]],
+    url: Option[String],
+    headers: Option[Map[String, String]],
+    env: Option[Map[String, String]]
 ) derives ConfigReader
