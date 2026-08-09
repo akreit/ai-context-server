@@ -32,12 +32,17 @@ services:
       - ${HOME}/.claude/CLAUDE.md:/home/vscode/.claude/CLAUDE.md:ro
       - ${HOME}/.claude/agents:/home/vscode/.claude/agents:ro
       - ${HOME}/.claude/commands:/home/vscode/.claude/commands:ro
-      # Host Agent config (optional)
-      - ${HOME}/.agents/skills:/home/vscode/.claude/skills:ro
       # Read-only Git directory
       # - ../.git:/workspace/.git:ro
       # Read-only IntelliJ IDEA project directory
       - ../.idea:/workspace/.idea:ro
+      # Shared dependency caches for the selected stacks (SANDCAT_MOUNT_SHARED_CACHE=false to disable)
+      - sandcat-cache-maven:/home/vscode/.m2/repository
+      - sandcat-cache-coursier:/home/vscode/.cache/coursier
+      - sandcat-cache-gradle:/home/vscode/.gradle/caches
+      - sandcat-cache-gradle-wrapper:/home/vscode/.gradle/wrapper/dists
+      - sandcat-cache-ivy:/home/vscode/.ivy2/cache
+      - sandcat-cache-sbt-boot:/home/vscode/.sbt/boot
     command: sleep infinity
     depends_on:
       wg-client:
@@ -54,3 +59,21 @@ services:
       - FOWNER
 volumes:
   agent-home:
+  sandcat-cache-maven:
+    external: true
+    name: sandcat-cache-maven
+  sandcat-cache-coursier:
+    external: true
+    name: sandcat-cache-coursier
+  sandcat-cache-gradle:
+    external: true
+    name: sandcat-cache-gradle
+  sandcat-cache-gradle-wrapper:
+    external: true
+    name: sandcat-cache-gradle-wrapper
+  sandcat-cache-ivy:
+    external: true
+    name: sandcat-cache-ivy
+  sandcat-cache-sbt-boot:
+    external: true
+    name: sandcat-cache-sbt-boot
