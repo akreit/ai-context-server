@@ -3,6 +3,14 @@
 	"dockerComposeFile": "compose-all.yml",
 	"service": "agent",
 	"workspaceFolder": "/workspaces/ai-context-server-sandbox",
+	// Preserve the compose `command` so the container's ENTRYPOINT
+	// (app-init.sh) runs on start — it installs the mitmproxy CA,
+	// adopts wg-client's resolv.conf, loads sandcat.env, and drops
+	// to the vscode user. Without this, JetBrains Gateway silently
+	// overrides the command and skips app-init.sh, bypassing
+	// sandcat's security boundary. Matches the Dev Containers spec
+	// default for dockerComposeFile scenarios.
+	"overrideCommand": false,
 	// Remove credential sockets that VS Code forwards into the container
 	// (SSH agent, git credential helper).  Clearing env vars alone only
 	// hides the paths — the socket files in /tmp can still be discovered
@@ -18,36 +26,10 @@
 		"GIT_ASKPASS": ""
 	},
 	"customizations": {
-		"vscode": {
-			"extensions": [
-				"anthropic.claude-code",
-				"github.vscode-pull-request-github",
-				"redhat.java",
-				"scalameta.metals"
-			],
-			"settings": {
-				// Prevent VS Code from copying host .gitconfig into the
-				// container, which can leak credential helpers and signing
-				// key references.
-				"dev.containers.copyGitConfig": false,
-				// Prompt before trusting workspace settings, which container
-				// code could modify via the bind-mounted project folder.
-				"security.workspace.trust.enabled": true,
-				// Block container extensions from opening a host-side
-				// terminal, which would bypass the WireGuard tunnel entirely.
-				// For maximum protection, also set this in your host user
-				// settings (workspace settings could theoretically override it).
-				"terminal.integrated.allowLocalTerminal": false,
-				// Sandcat provides the security boundary (network isolation,
-				// secret substitution, iptables kill-switch), so permission
-				// prompts inside the container add friction without meaningful
-				// security benefit. Remove these if you prefer interactive
-				// permission approval.
-				"claudeCode.allowDangerouslySkipPermissions": true,
-				"claudeCode.initialPermissionMode": "bypassPermissions",
-				// Optional: override the default Claude model.
-				"claudeCode.selectedModel": "opus"
-			}
+		"jetbrains": {
+			"backend": "IntelliJ",
+			"plugins": [],
+			"settings": {}
 		}
 	}
 }
