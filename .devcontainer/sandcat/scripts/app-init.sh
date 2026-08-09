@@ -91,6 +91,81 @@ else
     echo "No $SANDCAT_ENV found — env vars and secret substitution disabled"
 fi
 
+# Refresh image-managed home state (devbox profile, sandcat java-home
+# symlink and baseline cacerts, .bashrc env hooks) into the agent-home
+# volume when the image snapshot has changed since last start.
+#
+# The volume masks anything the Dockerfile writes under /home/vscode after
+# it was first initialized, so without this sync, edits to devbox.stack.json
+# or devbox.tools.json (or an updated JDK from the java block) never reach
+# an existing container — users would need `docker compose down -v`, which
+# wipes Claude auth and forces the IDE backend to re-upload.
+#
+# The snapshot lives in /opt/sandcat/snapshots/ (outside the volume mount)
+# and is rebuilt from scratch on every image build (see Dockerfile.app).
+# A content hash gates the rsync so unchanged rebuilds are no-ops.
+SNAPSHOT_DIR="/opt/sandcat/snapshots"
+SNAPSHOT_HASH_FILE="$SNAPSHOT_DIR/hash"
+VOLUME_HASH_FILE="/home/vscode/.sandcat-snapshot-hash"
+if [ -f "$SNAPSHOT_HASH_FILE" ]; then
+    image_hash=$(cat "$SNAPSHOT_HASH_FILE")
+    volume_hash=$(cat "$VOLUME_HASH_FILE" 2>/dev/null || echo "")
+    if [ "$image_hash" != "$volume_hash" ]; then
+        echo "sandcat: image snapshot changed, syncing home state to volume..."
+        # devbox: --delete so removed packages disappear from the profile.
+        # The whole subtree is image-owned; users never edit here directly.
+        rsync -a --delete "$SNAPSHOT_DIR/devbox/" \
+            /home/vscode/.local/share/devbox/
+        # sandcat: no --delete because app-user-init.sh writes cacerts
+        # (with the mitmproxy CA) here at runtime and we don't want to
+        # blow that away between the sync and the reimport.
+        if [ -d "$SNAPSHOT_DIR/sandcat" ]; then
+            mkdir -p /home/vscode/.local/share/sandcat
+            rsync -a "$SNAPSHOT_DIR/sandcat/" \
+                /home/vscode/.local/share/sandcat/
+        fi
+        cp "$SNAPSHOT_DIR/bashrc" /home/vscode/.bashrc
+        chown -R vscode:vscode \
+            /home/vscode/.local/share/devbox \
+            /home/vscode/.bashrc
+        if [ -d /home/vscode/.local/share/sandcat ]; then
+            chown -R vscode:vscode /home/vscode/.local/share/sandcat
+        fi
+        echo "$image_hash" > "$VOLUME_HASH_FILE"
+        chown vscode:vscode "$VOLUME_HASH_FILE"
+    fi
+fi
+
+# Shared-cache volumes (sandcat-cache-*) arrive as root:root because
+# `docker volume create` produces empty root-owned volumes and Docker
+# also creates any intermediate parent directories on the mount path as
+# root when they don't yet exist in the image (e.g. .gradle/ when
+# .gradle/caches/ is the mount target). Normalise ownership on both the
+# mount roots and the intermediate parents so vscode can lay down
+# tool-generated siblings like .m2/settings.xml or .gradle/daemon/.
+#
+# Only the listed directories are touched (non-recursive) — volumes
+# shared with other projects can hold thousands of files, and the tools
+# we care about only need the top-level dirs writable.
+for cache_dir in \
+    /home/vscode/.m2 \
+    /home/vscode/.m2/repository \
+    /home/vscode/.cache \
+    /home/vscode/.cache/coursier \
+    /home/vscode/.gradle \
+    /home/vscode/.gradle/wrapper \
+    /home/vscode/.gradle/caches \
+    /home/vscode/.gradle/wrapper/dists \
+    /home/vscode/.ivy2 \
+    /home/vscode/.ivy2/cache \
+    /home/vscode/.sbt \
+    /home/vscode/.sbt/boot
+do
+    if [ -d "$cache_dir" ]; then
+        chown vscode:vscode "$cache_dir" 2>/dev/null || true
+    fi
+done
+
 # Run vscode-user tasks in a login shell so user profile customizations
 # (PATH/NVM/direnv, etc.) are applied. Re-source sandcat.env inside that
 # shell so app-user-init still receives sandcat placeholders and env vars.
