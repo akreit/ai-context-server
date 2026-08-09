@@ -43,6 +43,8 @@ services:
       - sandcat-cache-gradle-wrapper:/home/vscode/.gradle/wrapper/dists
       - sandcat-cache-ivy:/home/vscode/.ivy2/cache
       - sandcat-cache-sbt-boot:/home/vscode/.sbt/boot
+      # Host Agent config (optional)
+      - ${HOME}/.agents/skills:/home/vscode/.claude/skills:ro
     command: sleep infinity
     depends_on:
       wg-client:
