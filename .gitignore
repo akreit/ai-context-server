@@ -37,3 +37,6 @@ project/project
 !.devcontainer/devbox.tools.json
 .sandcat/settings.local.json
 # /Sandcat
+
+# skip temp backup files & dirs
+*.bak
