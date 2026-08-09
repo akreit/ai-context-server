@@ -42,28 +42,20 @@ These points can be addressed by providing a dedicated API server that handles t
 
 ## Building and running the project
 
+This project comes with a devcontainer setup powered by [sandcat](https://github.com/VirtusLab/sandcat).
+To start your development environment, simply run:
+
+```shell
+sandcat run
+```
+
 This project uses sbt to build and compile the code, run tests and execute the application.
-You can use the sbt shell or run the commands directly in your terminal.
+You can use the sbt shell or run the commands directly in your terminal. The devcontainer comes with sbt installed, so you can run the commands directly in the terminal.
 
 ```shell
 sbt compile # build the project
 sbt test # run the tests
 sbt run # run the application (Main)
-```
-
-### Docker Compose
-
-You can also build an assembly and run the application using Docker Compose.
-This will create a Docker image for the application and start a container.
-
-First, build the assembly using sbt:
-```shell
-sbt assembly
-```
-
-Then, you can build the Docker image and run the container using Docker Compose:
-```shell
-docker-compose up --build
 ```
 
 You can now test the API server e.g. by opening the Swagger docs at `http://localhost:8080/docs/`.
