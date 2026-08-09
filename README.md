@@ -60,6 +60,10 @@ sbt run # run the application (Main)
 
 You can now test the API server e.g. by opening the Swagger docs at `http://localhost:8080/docs/`.
 
+## Local development ports
+
+By default the API server listens on `8080`. Make sure this port is free before running `sbt run`.
+
 ## Links:
 
 * [tapir documentation](https://tapir.softwaremill.com/en/latest/)
