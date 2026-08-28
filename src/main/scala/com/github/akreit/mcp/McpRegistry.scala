@@ -13,12 +13,8 @@ import chimp.protocol.ToolDefinition
 import com.github.akreit.config.McpServerConfig
 import com.github.akreit.utils.CatsLogger
 import io.circe.Json
-import sttp.client4.Backend
 import sttp.client4.DefaultSyncBackend
-import sttp.client4.GenericRequest
-import sttp.client4.Response
-import sttp.model.Uri
-import sttp.monad.MonadError
+import sttp.model.{Header, Uri}
 import sttp.shared.Identity
 
 /** Registry for MCP clients, which are initialized based on the application
@@ -131,7 +127,7 @@ object McpRegistry extends CatsLogger:
   ): Resource[IO, McpClient[Identity]] =
     cfg.url match
       case Some(url) =>
-        httpClientResource(name, url, cfg.headers.getOrElse(Map.empty))
+        httpClientResource(name, url, cfg.headers.getOrElse(Nil))
       case None =>
         cfg.command match
           case Some(command) =>
@@ -167,7 +163,7 @@ object McpRegistry extends CatsLogger:
   private def httpClientResource(
       name: String,
       url: String,
-      headers: Map[String, String]
+      headers: Seq[Header]
   ): Resource[IO, McpClient[Identity]] =
     Resource.make(
       logger.info(
@@ -180,8 +176,12 @@ object McpRegistry extends CatsLogger:
               throw IllegalArgumentException(
                 s"Invalid URL for MCP server '$name': $error"
               )
-          val backend = HeaderInjectingBackend(DefaultSyncBackend(), headers)
-          val transport = ClientHttpTransport[Identity](backend, uri)
+
+          val transport = ClientHttpTransport[Identity](
+            backend = DefaultSyncBackend(),
+            uri = uri,
+            headers = headers
+          )
           McpClient[Identity](transport, clientInfo)
         }
     )(closeClient(name))
@@ -191,18 +191,3 @@ object McpRegistry extends CatsLogger:
       .handleErrorWith(e =>
         logger.warn(s"Failed to close MCP client '$name': ${e.getMessage}")
       )
-
-  /** Wraps a synchronous sttp backend to inject fixed headers (e.g.
-    * `Authorization`) into every request, since [[ClientHttpTransport]] builds
-    * its requests internally and has no hook for per-request headers.
-    */
-  private final class HeaderInjectingBackend(
-      delegate: Backend[Identity],
-      headers: Map[String, String]
-  ) extends Backend[Identity]:
-    def send[T](
-        request: GenericRequest[T, Any & sttp.capabilities.Effect[Identity]]
-    ): Identity[Response[T]] =
-      delegate.send(request.headers(headers))
-    def close(): Identity[Unit] = delegate.close()
-    def monad: MonadError[Identity] = delegate.monad
