@@ -49,8 +49,7 @@ To start your development environment, simply run:
 sandcat run
 ```
 
-This project uses sbt to build and compile the code, run tests and execute the application.
-You can use the sbt shell or run the commands directly in your terminal. The devcontainer comes with sbt installed, so you can run the commands directly in the terminal.
+Once the devcontainer has started, you can use sbt to build and compile the code, run tests and execute the application:
 
 ```shell
 sbt compile # build the project
@@ -58,11 +57,17 @@ sbt test # run the tests
 sbt run # run the application (Main)
 ```
 
+In addition, the devcontainer comes with:
+* the [scala metals language server](https://github.com/scalameta/metals) which also includes a standalone mcp server.
+* [cellar](https://github.com/VirtusLab/cellar) → a cli for looking up type signatures, packages, members etc.
+
+Both tools improve the effectiveness of working on this project with coding agents such as Claude Code.
+
 You can now test the API server e.g. by opening the Swagger docs at `http://localhost:8080/docs/`.
 
 ## Local development ports
 
-By default the API server listens on `8080`. Make sure this port is free before running `sbt run`.
+By default, the API server listens on `8080`. Make sure this port is free before running `sbt run`.
 
 ## Links:
 

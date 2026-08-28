@@ -5,6 +5,7 @@ import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all.*
 import chimp.client.McpClient
+import chimp.client.transport.ClientHttpTransport
 import chimp.client.transport.ClientStdioTransport
 import chimp.protocol.Implementation
 import chimp.protocol.ToolContent
@@ -12,6 +13,8 @@ import chimp.protocol.ToolDefinition
 import com.github.akreit.config.McpServerConfig
 import com.github.akreit.utils.CatsLogger
 import io.circe.Json
+import sttp.client4.DefaultSyncBackend
+import sttp.model.{Header, Uri}
 import sttp.shared.Identity
 
 /** Registry for MCP clients, which are initialized based on the application
@@ -110,31 +113,81 @@ object McpRegistry extends CatsLogger:
         )
       )
 
-  /** start the local MCP server process and set up stdio client transport
-    * (configurable)
+  /** Build the client for a configured MCP server: either a local stdio
+    * subprocess (`cfg.command`) or a remote HTTP server (`cfg.url`).
     * @param name
     *   logical name of the MCP server, used to reference it in the API and logs
     * @param cfg
-    *   [[McpServerConfig]] defined in the application config, containing the
-    *   command to start the MCP server and its arguments
+    *   [[McpServerConfig]] defined in the application config
     * @return
     */
   private def clientResource(
       name: String,
       cfg: McpServerConfig
   ): Resource[IO, McpClient[Identity]] =
+    cfg.url match
+      case Some(url) =>
+        httpClientResource(name, url, cfg.headers.getOrElse(Nil))
+      case None =>
+        cfg.command match
+          case Some(command) =>
+            stdioClientResource(
+              name,
+              command,
+              cfg.args.getOrElse(Nil),
+              cfg.env.getOrElse(Map.empty)
+            )
+          case None =>
+            Resource.eval(
+              IO.raiseError(
+                IllegalArgumentException(
+                  s"MCP server '$name' must configure either 'command' or 'url'"
+                )
+              )
+            )
+
+  private def stdioClientResource(
+      name: String,
+      command: String,
+      args: List[String],
+      env: Map[String, String]
+  ): Resource[IO, McpClient[Identity]] =
     Resource.make(
-      logger.info(
-        s"Initializing MCP client '$name' with command: ${cfg.command}"
-      ) >>
+      logger.info(s"Initializing MCP client '$name' with command: $command") >>
         IO.blocking {
-          val transport =
-            ClientStdioTransport(cfg.command :: cfg.args, cfg.env)
+          val transport = ClientStdioTransport(command :: args, env)
           McpClient[Identity](transport, clientInfo)
         }
-    )(client =>
-      IO.blocking(client.close())
-        .handleErrorWith(e =>
-          logger.warn(s"Failed to close MCP client '$name': ${e.getMessage}")
-        )
-    )
+    )(closeClient(name))
+
+  private def httpClientResource(
+      name: String,
+      url: String,
+      headers: Seq[Header]
+  ): Resource[IO, McpClient[Identity]] =
+    Resource.make(
+      logger.info(
+        s"Initializing MCP client '$name' with remote server: $url"
+      ) >>
+        IO.blocking {
+          val uri = Uri.parse(url) match
+            case Right(parsed) => parsed
+            case Left(error)   =>
+              throw IllegalArgumentException(
+                s"Invalid URL for MCP server '$name': $error"
+              )
+
+          val transport = ClientHttpTransport[Identity](
+            backend = DefaultSyncBackend(),
+            uri = uri,
+            headers = headers
+          )
+          McpClient[Identity](transport, clientInfo)
+        }
+    )(closeClient(name))
+
+  private def closeClient(name: String)(client: McpClient[Identity]): IO[Unit] =
+    IO.blocking(client.close())
+      .handleErrorWith(e =>
+        logger.warn(s"Failed to close MCP client '$name': ${e.getMessage}")
+      )

@@ -12,5 +12,6 @@
       "Bash(curl -s http://localhost:55453/mcp -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: 29e80616-2337-422e-9f40-513c98f4698a' -d '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}')",
       "Bash(curl -s http://localhost:55453/mcp -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: 29e80616-2337-422e-9f40-513c98f4698a' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"compile-full\",\"arguments\":{}}}')"
     ]
-  }
+  },
+  "enabledMcpjsonServers": []
 }
